@@ -132,6 +132,17 @@
     color:var(--accent); font-size:16px; pointer-events:none;
   }
   .selhint { font-size:11px; color:var(--faint); margin:0 0 6px; }
+  /* v3: cloud sync */
+  .syncbox { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:16px; }
+  .syncbox input {
+    width:100%; height:44px; border-radius:8px; border:1px solid var(--border);
+    background:var(--bg); color:var(--text); padding:0 10px; font-size:14px; margin-bottom:8px;
+  }
+  .syncbox input:focus { outline:none; border-color:var(--accent); }
+  .syncstat { font-size:11px; color:var(--faint); margin:4px 0 0; }
+  .syncstat.ok { color:var(--green); }
+  .syncstat.err { color:var(--red); }
+
 
 </style>
 </head>
@@ -183,6 +194,65 @@ function fridayPick(){
 }
 function scheduleFor(dow){ // 0=Sun..6=Sat
   return {1:"A",2:"C",3:"B",4:"C",5:fridayPick(),6:null,0:null}[dow];
+}
+
+// ---------------- Cloud sync (v3): private GitHub repo ----------------
+const SYNC_KEY = "iron-log-sync";
+let sync = {token:"", repo:"", last:""};
+try { const r = localStorage.getItem(SYNC_KEY); if (r) sync = Object.assign(sync, JSON.parse(r)); } catch(e){}
+function saveSyncCfg(){
+  sync.token = document.getElementById("gh_token").value.trim();
+  sync.repo  = document.getElementById("gh_repo").value.trim();
+  try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch(e){}
+  toast(sync.token && sync.repo ? "Sync configured." : "Sync cleared.");
+  render();
+}
+function b64(str){ return btoa(unescape(encodeURIComponent(str))); }
+function unb64(str){ return decodeURIComponent(escape(atob(str))); }
+function ghUrl(){ return "https://api.github.com/repos/"+sync.repo+"/contents/iron-log.json"; }
+function ghHeaders(){ return {"Authorization":"Bearer "+sync.token,"Accept":"application/vnd.github+json"}; }
+
+async function cloudBackup(silent){
+  if (!sync.token || !sync.repo) { if(!silent) toast("Set up sync first."); return; }
+  try {
+    let sha = null;
+    const g = await fetch(ghUrl(), {headers: ghHeaders()});
+    if (g.status === 200) sha = (await g.json()).sha;
+    else if (g.status !== 404) throw new Error("read "+g.status);
+    const body = {message:"backup "+new Date().toISOString(), content:b64(JSON.stringify({sessions}))};
+    if (sha) body.sha = sha;
+    const p = await fetch(ghUrl(), {method:"PUT", headers: ghHeaders(), body: JSON.stringify(body)});
+    if (!p.ok) throw new Error("write "+p.status);
+    sync.last = new Date().toISOString();
+    try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch(e){}
+    if (!silent){ toast("Backed up to GitHub."); render(); }
+    else updateSyncStat();
+  } catch(e){
+    if (!silent) toast("Backup failed \u2014 check token/repo.");
+    else toast("Auto-backup failed (data saved locally).");
+  }
+}
+async function cloudRestore(){
+  if (!sync.token || !sync.repo) { toast("Set up sync first."); return; }
+  try {
+    const g = await fetch(ghUrl(), {headers: ghHeaders()});
+    if (g.status === 404) { toast("No cloud backup found yet."); return; }
+    if (!g.ok) throw new Error(g.status);
+    const data = await g.json();
+    const p = JSON.parse(unb64(data.content.replace(/\n/g,"")));
+    if (!Array.isArray(p.sessions)) throw 0;
+    const ids = new Set(sessions.map(s=>s.id));
+    let added = 0;
+    p.sessions.forEach(s=>{ if(!ids.has(s.id)){ sessions.push(s); added++; } });
+    sessions.sort((a,b)=>a.id-b.id);
+    persist();
+    toast("Restored \u2014 "+added+" sessions merged.");
+    render();
+  } catch(e){ toast("Restore failed \u2014 check token/repo."); }
+}
+function updateSyncStat(){
+  const el = document.getElementById("syncstat");
+  if (el && sync.last) { el.textContent = "Last backup: "+new Date(sync.last).toLocaleString(); el.className="syncstat ok"; }
 }
 const KEY = "iron-log-v1";
 
@@ -336,10 +406,12 @@ function saveSession(){
   persist(); values={};
   toast("Saved \u2014 "+logged+" exercises logged.");
   render();
+  cloudBackup(true);
 }
 function deleteSession(id){
   sessions = sessions.filter(s=>s.id!==id);
   persist(); toast("Session deleted."); render();
+  cloudBackup(true);
 }
 
 // ---------------- Progress ----------------
@@ -415,7 +487,17 @@ function renderProgress(){
     });
     h+='</div>';
   }
-  h+='<h2 class="sect disp">Backup</h2><div class="rowbtns">'
+  h+='<h2 class="sect disp">Cloud sync \u2014 private GitHub repo</h2>';
+  h+='<div class="syncbox">';
+  h+='<input id="gh_repo" placeholder="Repo (e.g. JCFrith/iron-log-data)" value="'+esc(sync.repo)+'" autocapitalize="off" autocorrect="off">';
+  h+='<input id="gh_token" type="password" placeholder="GitHub token" value="'+esc(sync.token)+'" autocapitalize="off" autocorrect="off">';
+  h+='<div class="rowbtns" style="margin:4px 0 0">'
+    +'<button onclick="saveSyncCfg()">Save config</button>'
+    +'<button onclick="cloudBackup(false)">Backup now</button>'
+    +'<button onclick="cloudRestore()">Restore</button></div>';
+  h+='<p id="syncstat" class="syncstat'+(sync.last?" ok":"")+'">'+(sync.last?("Last backup: "+new Date(sync.last).toLocaleString()):"Not configured \u2014 backs up automatically after every saved workout once set up.")+'</p>';
+  h+='</div>';
+  h+='<h2 class="sect disp">Manual backup</h2><div class="rowbtns">'
     +'<button onclick="exportData()">Export JSON</button>'
     +'<button onclick="document.getElementById(\'importfile\').click()">Import JSON</button>'
     +'<input type="file" id="importfile" accept=".json,application/json" style="display:none" onchange="importData(this)"></div>';

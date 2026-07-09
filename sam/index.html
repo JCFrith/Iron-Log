@@ -35,17 +35,8 @@
   }
   .tabs button.on { background:var(--accent); color:#1a0a12; }
   main { padding:16px; max-width:640px; margin:0 auto; }
-  .sched { display:flex; gap:6px; margin-bottom:14px; }
-  .sched .day {
-    flex:1; border:1px solid var(--border); border-radius:10px; background:var(--panel);
-    padding:7px 0 6px; text-align:center; cursor:pointer;
-  }
-  .sched .day.today { border-color:var(--accent); background:#2c1220; }
-  .sched .day.rest { opacity:.35; cursor:default; }
-  .sched .dname { font-size:9px; letter-spacing:.12em; color:var(--faint); }
-  .sched .day.today .dname { color:var(--accent); }
-  .sched .dwk { font-size:15px; font-weight:700; color:var(--text); margin-top:1px; }
-  .sched .day.today .dwk { color:var(--accent); }
+  .upnext { margin:0 0 12px; font-size:14px; color:var(--dim); }
+  .upnext b { color:var(--accent); }
   .wpick { display:flex; gap:8px; margin-bottom:16px; }
   .wpick button {
     flex:1; padding:12px 0; border-radius:10px; border:1px solid var(--border);
@@ -194,8 +185,15 @@ const WEEK_TARGET = 4;
 const INC = 5;
 const KEY = "iron-log-sam-v1";
 
-// ---------------- Schedule ----------------
-function scheduleFor(dow){ return {1:"A",2:"Y",4:"B",6:"Y"}[dow] || null; }
+// ---------------- Auto-select: opposite of last completed strength day ----------------
+function nextStrength(){
+  for (let i=sessions.length-1;i>=0;i--){
+    const w = sessions[i].workout;
+    if (w==="A") return "B";
+    if (w==="B") return "A";
+  }
+  return "A";
+}
 
 // ---------------- Cloud sync: shared private repo, separate file ----------------
 const SYNC_KEY = "iron-log-sam-sync";
@@ -255,7 +253,7 @@ async function cloudRestore(){
 let sessions = [];
 try { const raw = localStorage.getItem(KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p.sessions)) sessions = p.sessions; } } catch(e){}
 let tab = "train";
-let workoutId = scheduleFor(new Date().getDay()) || "A";
+let workoutId = nextStrength();
 let values = {};
 let progressEx = "leg-press";
 function persist(){ try { localStorage.setItem(KEY, JSON.stringify({sessions})); } catch(e){ toast("Storage failed \u2014 device may be full."); } }
@@ -305,20 +303,9 @@ function render(){
 }
 
 function renderTrain(){
-  const todayDow = new Date().getDay();
-  const days = [["MON",1],["TUE",2],["WED",3],["THU",4],["FRI",5],["SAT",6],["SUN",0]];
-  let h = '<div class="sched">';
-  for (const [nm,dow] of days){
-    const wk = scheduleFor(dow);
-    const isToday = dow===todayDow;
-    if (wk){
-      h += '<div class="day'+(isToday?" today":"")+'" onclick="setWorkout(\''+wk+'\')">'
-        +'<div class="dname">'+nm+'</div><div class="dwk disp">'+wk+'</div></div>';
-    } else {
-      h += '<div class="day rest'+(isToday?" today":"")+'"><div class="dname">'+nm+'</div><div class="dwk">\u2013</div></div>';
-    }
-  }
-  h += '</div><div class="wpick">';
+  const nxt = nextStrength();
+  let h = '<p class="upnext">Up next: <b>Day '+nxt+'</b>'+(workoutId===nxt?'':' \u2014 you\u2019ve switched to '+(WORKOUTS[workoutId]?WORKOUTS[workoutId].label:workoutId))+'</p>';
+  h += '<div class="wpick">';
   for (const [id,wk] of Object.entries(WORKOUTS))
     h += '<button class="'+(id===workoutId?"on":"")+'" onclick="setWorkout(\''+id+'\')"><div class="big disp">'+esc(wk.label)+'</div><div class="tag">'+wk.tag+'</div></button>';
   h += '</div>';
@@ -408,6 +395,7 @@ function saveSession(){
   sessions.push({id:Date.now(), date:new Date().toISOString(), workout:workoutId, entries});
   persist(); values={};
   toast("Saved \u2014 "+logged+" exercises logged.");
+  workoutId = nextStrength();
   render();
   cloudBackup(true);
 }

@@ -197,6 +197,13 @@
   .adjust > div { overflow:hidden; }
   .adjinner { padding-top:12px; display:grid; gap:8px; }
   .setrow { display:grid; grid-template-columns:44px minmax(0,1fr) minmax(0,.85fr); gap:8px; align-items:center; border-radius:14px; }
+  .setrow.rm { grid-template-columns:44px minmax(0,1fr) minmax(0,.85fr) 38px; }
+  .rmset {
+    width:38px; height:46px; border-radius:12px; border:1px solid rgba(252,165,165,.25);
+    background:rgba(42,23,23,.8); color:var(--danger); font-size:14px;
+    transition:transform .15s var(--sp);
+  }
+  .rmset:active { transform:scale(.9); }
   .setrow:focus-within { background:rgba(255,255,255,.025); }
   .setlbl { color:var(--dim); font-family:var(--display); font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
   .stepper {
@@ -635,12 +642,14 @@ function renderTrain(){
     // set rows: always open
     h += '<div class="adjinner" style="padding-top:12px">';
     rows.forEach((row,si)=>{
-      h += '<div class="setrow"><span class="setlbl">Set '+(si+1)+'</span>'
+      h += '<div class="setrow'+(si>=e.sets?" rm":"")+'"><span class="setlbl">Set '+(si+1)+'</span>'
         + stepper(e.id,si,"w",row.w,5)
-        + stepper(e.id,si,"r",row.r,1)+'</div>';
+        + stepper(e.id,si,"r",row.r,1)
+        + (si>=e.sets ? '<button class="rmset" onclick="removeSet(\''+e.id+'\','+si+')" aria-label="remove set '+(si+1)+'">\u2715</button>' : '')
+        +'</div>';
     });
     if (plan.sets && rows.every(s=>s.w===""))
-      h += '<button class="prefillbtn" onclick="prefillPlan(\''+e.id+'\')">Prefill '+plan.sets[0].w+' lb + targets</button>';
+      h += '<button class="prefillbtn" onclick="prefillPlan(\''+e.id+'\')">Prefill '+plan.sets[0].w+' lb</button>';
     if (rows.length<6) h += '<button class="addset" onclick="addSet(\''+e.id+'\')">+ Add set</button>';
     h += '</div>';
     h += '</div>';
@@ -713,7 +722,15 @@ function prefillPlan(exId){
   const e = findEx(exId);
   const plan = planFor(e);
   if (!plan.sets) return;
-  values[exId] = plan.sets.map(s=>({w:String(s.w), r:String(s.r)}));
+  values[exId] = plan.sets.map(s=>({w:String(s.w), r:""}));
+  render();
+}
+function removeSet(exId, i){
+  ensureRows(exId);
+  const e = findEx(exId);
+  if (i < e.sets || i >= values[exId].length) return; // core sets can't be removed
+  values[exId].splice(i,1);
+  liveTally();
   render();
 }
 function addSet(exId){
@@ -728,10 +745,10 @@ function fillAll(){
   for (const e of w.exercises){
     const plan = planFor(e);
     if (!plan.sets) continue;
-    values[e.id] = plan.sets.map(s=>({w:String(s.w), r:String(s.r)}));
+    values[e.id] = plan.sets.map(s=>({w:String(s.w), r:""}));
     filled++;
   }
-  toast(filled ? "Plan loaded \u2014 adjust anything that deviated." : "No history yet \u2014 set baselines first.");
+  toast(filled ? "Weights loaded \u2014 enter reps as you finish each set." : "No history yet \u2014 set baselines first.");
   render();
 }
 

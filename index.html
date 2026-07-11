@@ -531,7 +531,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "8.6";
+const APP_VERSION = "8.7";
 
 let auth = null;      // {at, rt, exp, uid, email}
 let profile = null;   // {display_name, is_coach, program_id}
@@ -602,10 +602,16 @@ async function signIn(){
       method:"POST", headers:{ "apikey":SUPA_KEY, "Content-Type":"application/json" },
       body: JSON.stringify({ email, create_user:true, options:{ email_redirect_to: location.origin+location.pathname } })
     });
-    if (!r.ok) throw 0;
+    if (!r.ok){
+      let msg = "";
+      try { const d = await r.json(); msg = d.msg || d.message || d.error_description || d.error || ""; } catch(e){}
+      if (r.status===429) toast("Email limit hit \u2014 Supabase only sends a few sign-in links per hour per address. Wait ~an hour and retry.");
+      else toast("Send failed ("+r.status+"): "+(msg||"unknown error"));
+      return;
+    }
     signinSent = email;
     render();
-  } catch(e){ toast("Couldn\u2019t send the link \u2014 check connection and retry."); }
+  } catch(e){ toast("Couldn\u2019t reach the sign-in server \u2014 check connection and retry."); }
 }
 async function signOut(){
   try { await sb("/auth/v1/logout", {method:"POST"}); } catch(e){}

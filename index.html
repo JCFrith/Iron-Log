@@ -531,7 +531,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "8.7";
+const APP_VERSION = "8.8";
 
 let auth = null;      // {at, rt, exp, uid, email}
 let profile = null;   // {display_name, is_coach, program_id}
@@ -554,8 +554,10 @@ function parseAuthHash(){
   location.hash.replace(/^#/,"").split("&").forEach(kv=>{ const [k,v]=kv.split("="); p[k]=decodeURIComponent(v||""); });
   if (!p.access_token || !p.refresh_token) return false;
   const jp = jwtPayload(p.access_token) || {};
-  auth = { at:p.access_token, rt:p.refresh_token, exp: Math.floor(Date.now()/1000)+(Number(p.expires_in)||3600), uid: jp.sub, email: jp.email||"" };
+  const expAbs = Number(p.expires_at) || (jp.exp) || (Math.floor(Date.now()/1000)+(Number(p.expires_in)||3600));
+  auth = { at:p.access_token, rt:p.refresh_token, exp: expAbs, uid: jp.sub, email: jp.email||"" };
   saveAuth();
+  if (expAbs < Math.floor(Date.now()/1000)) setTimeout(()=>toast("That sign-in link already expired \u2014 send yourself a fresh one."), 500);
   try { history.replaceState(null,"",location.pathname+location.search); } catch(e){}
   return true;
 }
@@ -757,7 +759,10 @@ async function bootBackend(){
   if (!auth) { updateNetBadge(); return; }
   netState="syncing"; updateNetBadge();
   try {
-    if (auth.exp - 60 < Math.floor(Date.now()/1000)){ const ok = await refreshAuth(); if (!ok){ render(); return; } }
+    if (auth.exp - 60 < Math.floor(Date.now()/1000)){
+      const ok = await refreshAuth();
+      if (!ok){ setTimeout(()=>toast("Session expired \u2014 sign in again to sync."), 600); render(); return; }
+    }
     await ensureProfile();
     await loadProgram();
     const added = await pullMergePush();

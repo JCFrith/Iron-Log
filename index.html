@@ -363,6 +363,7 @@
     background:linear-gradient(135deg,#f36a1d,#c94705); color:#fff; font-weight:900;
   }
   .silink { border:0; background:none; color:var(--accent-hi); font-size:13px; text-decoration:underline; padding:4px 0; }
+  .ver { margin-left:7px; color:var(--faint); font-size:10px; font-weight:700; letter-spacing:.08em; }
   .netdot { display:inline-block; width:8px; height:8px; border-radius:99px; vertical-align:middle; margin-left:6px; }
   .netdot.local { background:var(--faint); }
   .netdot.syncing { background:var(--warn); }
@@ -442,7 +443,7 @@
 </defs></svg>
 <header><div class="hin">
   <div class="hrow">
-    <div><div class="brand disp">Iron Log <span id="netdot" class="netdot local"></span></div><div class="brandsub">Adaptive strength system</div></div>
+    <div><div class="brand disp">Iron Log <span id="netdot" class="netdot local"></span><span class="ver num" id="verbadge"></span><div class="brandsub">Adaptive strength system</div></div>
     <div class="weekbadge num" id="weekbadge"></div>
   </div>
   <div class="tabs">
@@ -530,6 +531,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
+const APP_VERSION = "8.6";
 
 let auth = null;      // {at, rt, exp, uid, email}
 let profile = null;   // {display_name, is_coach, program_id}
@@ -1474,6 +1476,7 @@ function renderProgress(){
   h += '</div>';
 
   h += '<details class="sys a"><summary>System \u2014 account & backup</summary><div class="sysin">';
+  h += '<p class="statline">Iron Log v'+APP_VERSION+'</p>';
   if (auth){
     h += '<p class="statline ok">Signed in as '+esc(auth.email||auth.uid)+(programName?' \u00B7 '+esc(programName):'')+'</p>';
     h += '<p class="statline">Every saved workout syncs to your account automatically. Sign in on any device to pick up your full history.</p>';
@@ -1558,6 +1561,7 @@ try {
     draftRestored = true;
   } else if (d) clearDraft();
 } catch(e){}
+(function(){ const v=document.getElementById("verbadge"); if (v) v.textContent="v"+APP_VERSION; })();
 render();
 if (draftRestored) setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400);
 bootBackend();

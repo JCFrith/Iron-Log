@@ -55,8 +55,11 @@
   }
   .hin { max-width:760px; margin:0 auto; }
   .hrow { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-  .brand { font-size:clamp(26px,8vw,36px); line-height:1; letter-spacing:.055em; color:#fff; }
-  .brandsub { margin-top:3px; color:var(--faint); font-size:10px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+  .brand { font-size:clamp(19px,5.5vw,32px); line-height:1; letter-spacing:.05em; color:#fff; white-space:nowrap; }
+  .hrow { gap:10px; }
+  .hrow > .brand, .hrow > div:first-child { min-width:0; }
+  .hright { flex-shrink:0; }
+  .brandsub { margin-top:3px; color:var(--faint); font-size:clamp(8px,2.3vw,10px); white-space:nowrap; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
   .hright { display:flex; align-items:center; gap:9px; }
   .burger {
     width:42px; height:42px; border-radius:12px; border:1px solid var(--border);
@@ -81,8 +84,8 @@
   }
   .menuver { margin:12px 0 0; text-align:center; color:var(--faint); font-size:10.5px; letter-spacing:.08em; }
   .weekbadge {
-    flex:none; border:1px solid var(--border); border-radius:999px; padding:8px 12px;
-    color:var(--dim); font-size:12px; font-weight:800; white-space:nowrap; background:rgba(23,23,23,.7);
+    flex:none; border:1px solid var(--border); border-radius:999px; padding:8px 11px;
+    color:var(--dim); font-size:clamp(11px,3vw,12.5px); font-weight:800; white-space:nowrap; background:rgba(23,23,23,.7);
   }
   .weekbadge b { color:var(--text); }
   .tabs { display:flex; margin-top:12px; } .tabs button { flex:1; }
@@ -578,7 +581,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.2";
+const APP_VERSION = "9.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -1107,7 +1110,7 @@ function updateWeekBadge(){
   const k = weekKey(new Date().toISOString());
   const n = sessions.filter(s=>weekKey(s.date)===k).length;
   const el = document.getElementById("weekbadge");
-  if (el) el.innerHTML = "<b>"+n+"/"+WEEK_TARGET+"</b> sessions this week";
+  if (el) el.innerHTML = "<b>"+n+"/"+WEEK_TARGET+"</b> this week";
 }
 function render(){
   updateWeekBadge();

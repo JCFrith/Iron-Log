@@ -402,7 +402,7 @@
   .linkstack { display:flex; flex-direction:column; align-items:flex-start; gap:2px; margin-top:10px; }
   .linkstack .silink { padding:6px 0; }
   .ver { margin-left:7px; color:var(--faint); font-size:10px; font-weight:700; letter-spacing:.08em; }
-  .netdot { display:inline-block; width:8px; height:8px; border-radius:99px; vertical-align:middle; margin-left:6px; }
+  .netdot { display:block; flex:none; width:8px; height:8px; border-radius:99px; border:0; background-clip:padding-box; margin:0; padding:0; }
   .netdot.local { background:var(--faint); }
   .netdot.syncing { background:var(--warn); }
   .netdot.live { background:var(--ok); }
@@ -490,8 +490,9 @@
 </defs></svg>
 <header><div class="hin">
   <div class="hrow">
-    <div class="brand disp">Iron Log <span id="netdot" class="netdot local"></span><div class="brandsub">Adaptive strength system</div></div>
+    <div class="brand disp">Iron Log<div class="brandsub">Adaptive strength system</div></div>
     <div class="hright">
+      <span id="netdot" class="netdot local"></span>
       <div class="weekbadge num" id="weekbadge"></div>
       <button class="burger" onclick="toggleMenu()" aria-label="menu">☰</button>
     </div>
@@ -581,7 +582,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.3";
+const APP_VERSION = "9.5";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}

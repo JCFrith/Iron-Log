@@ -352,6 +352,12 @@
   .sit { font-size:20px; color:#fff; }
   .sic { margin:7px 0 12px; color:var(--dim); font-size:13px; line-height:1.5; }
   .sic b { color:var(--text); }
+  .fullinput {
+    width:100%; min-height:48px; margin-bottom:8px; border:1px solid var(--border); border-radius:13px;
+    background:#101010; color:var(--text); padding:0 12px; font-size:15px; outline:none;
+    -webkit-appearance:none; appearance:none;
+  }
+  .fullinput:focus { border-color:var(--accent); }
   .sirow { display:flex; gap:8px; }
   .sirow input {
     flex:1; min-width:0; min-height:48px; border:1px solid var(--border); border-radius:13px;
@@ -531,7 +537,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "8.9";
+const APP_VERSION = "9.0";
 
 let auth = null;      // {at, rt, exp, uid, email}
 let profile = null;   // {display_name, is_coach, program_id}
@@ -745,8 +751,96 @@ async function choosePath(key){
 }
 function coachTab(){ setTab("coach"); }
 
+// ---------- post-auth pipeline ----------
+async function afterAuth(){
+  netState="syncing"; updateNetBadge();
+  try {
+    await ensureProfile();
+    await loadProgram();
+    const added = await pullMergePush();
+    netState="live"; updateNetBadge();
+    if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
+    if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
+  } catch(e){ netState="error"; updateNetBadge(); }
+  render();
+}
+function adoptSession(d){
+  const jp = jwtPayload(d.access_token) || {};
+  auth = { at:d.access_token, rt:d.refresh_token, exp: Math.floor(Date.now()/1000)+(d.expires_in||3600), uid: jp.sub, email: jp.email||"" };
+  saveAuth();
+}
+
+// ---------- password auth ----------
+async function authFields(){
+  const g = id => { const el=document.getElementById(id); return el ? el.value.trim() : ""; };
+  return { first:g("si_first"), lastN:g("si_last"), email:g("si_email"), pw:(document.getElementById("si_pw")||{}).value||"" };
+}
+async function signUpPw(){
+  const f = await authFields();
+  if (!f.first){ toast("Enter your first name."); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email)){ toast("Enter a valid email."); return; }
+  if (f.pw.length < 8){ toast("Password needs at least 8 characters."); return; }
+  try { localStorage.setItem("iron-log-pending-name", (f.first+" "+f.lastN).trim()); } catch(e){}
+  try {
+    const r = await fetch(SUPA+"/auth/v1/signup", {
+      method:"POST", headers:{ "apikey":SUPA_KEY, "Content-Type":"application/json" },
+      body: JSON.stringify({ email:f.email, password:f.pw })
+    });
+    const d = await r.json();
+    if (!r.ok){
+      const msg = d.msg||d.message||d.error_description||"";
+      if (/already registered/i.test(msg)) toast("That email already has an account \u2014 use Sign in, or Forgot password.");
+      else toast("Sign-up failed: "+(msg||r.status));
+      return;
+    }
+    if (d.access_token){ adoptSession(d); toast("Account created \u2014 you\u2019re in."); await afterAuth(); }
+    else toast("Account created \u2014 check your email to confirm, then sign in. (Tip: turn off email confirmation in Supabase to skip this.)");
+  } catch(e){ toast("Couldn\u2019t reach the sign-in server."); }
+}
+async function signInPw(){
+  const f = await authFields();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email)){ toast("Enter a valid email."); return; }
+  if (!f.pw){ toast("Enter your password."); return; }
+  try {
+    const r = await fetch(SUPA+"/auth/v1/token?grant_type=password", {
+      method:"POST", headers:{ "apikey":SUPA_KEY, "Content-Type":"application/json" },
+      body: JSON.stringify({ email:f.email, password:f.pw })
+    });
+    const d = await r.json();
+    if (!r.ok){
+      const msg = d.msg||d.message||d.error_description||"";
+      if (/invalid/i.test(msg)) toast("Wrong email or password. If you signed up before passwords existed, tap Forgot password.");
+      else toast("Sign-in failed: "+(msg||r.status));
+      return;
+    }
+    adoptSession(d);
+    await afterAuth();
+  } catch(e){ toast("Couldn\u2019t reach the sign-in server."); }
+}
+async function forgotPw(){
+  const f = await authFields();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email)){ toast("Enter your email above first, then tap Forgot password."); return; }
+  try {
+    const r = await fetch(SUPA+"/auth/v1/recover", {
+      method:"POST", headers:{ "apikey":SUPA_KEY, "Content-Type":"application/json" },
+      body: JSON.stringify({ email:f.email, options:{ email_redirect_to: location.origin+location.pathname } })
+    });
+    if (!r.ok) throw 0;
+    toast("Recovery email sent. Open the link (it lands in the browser), set a new password under System, then sign in here.");
+  } catch(e){ toast("Couldn\u2019t send recovery email \u2014 try again in a bit."); }
+}
+async function changePw(){
+  const el = document.getElementById("newpw");
+  const pw = el ? el.value : "";
+  if (pw.length < 8){ toast("New password needs at least 8 characters."); return; }
+  const r = await sb("/auth/v1/user", { method:"PUT", body:{ password: pw } });
+  if (r.ok){ if (el) el.value=""; toast("Password updated."); }
+  else toast("Couldn\u2019t update password \u2014 sign in again and retry.");
+}
+
 // ---------- boot ----------
 let signinSent = null;
+let authMode = "signin";
 let pathSex = null;
 let localOnly = false;
 try { localOnly = localStorage.getItem("iron-log-local-ok")==="1"; } catch(e){}
@@ -759,23 +853,11 @@ async function bootBackend(){
   loadAuth();
   parseAuthHash();
   if (!auth) { updateNetBadge(); return; }
-  netState="syncing"; updateNetBadge();
-  try {
-    if (auth.exp - 60 < Math.floor(Date.now()/1000)){
-      const ok = await refreshAuth();
-      if (!ok){ setTimeout(()=>toast("Session expired \u2014 sign in again to sync."), 600); render(); return; }
-    }
-    await ensureProfile();
-    await loadProgram();
-    const added = await pullMergePush();
-    netState="live";
-    if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
-    if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
-    render();
-  } catch(e){
-    netState="error"; updateNetBadge();
-    // offline or backend down: local + built-in program keeps working
+  if (auth.exp - 60 < Math.floor(Date.now()/1000)){
+    const ok = await refreshAuth();
+    if (!ok){ setTimeout(()=>toast("Session expired \u2014 sign in again to sync."), 600); render(); return; }
   }
+  await afterAuth();
 }
 
 // ================= State (unchanged contract) =================
@@ -1006,9 +1088,11 @@ function renderTrain(){
       acct += '<div class="sit disp">Check your email</div><p class="sic">Sign-in link sent to <b>'+esc(signinSent)+'</b>. Tap it on this phone and you\u2019ll land back here, signed in. Your local log carries over automatically.</p>';
       acct += '<button class="silink" onclick="signinSent=null;render()">Use a different email</button>';
     } else {
-      acct += '<div class="sit disp">Sign in to sync</div><p class="sic">Your log currently lives on this device only. Sign in and it follows you to any phone \u2014 plus your coach-assigned program loads automatically.</p>';
+      acct += '<div class="sit disp">Sign in to sync</div><p class="sic">Your log currently lives on this device only. Sign in (or create an account) and it follows you anywhere.</p>';
       acct += '<div class="namerow"><input id="si_first" placeholder="First name"><input id="si_last" placeholder="Last name"></div>';
-      acct += '<div class="sirow"><input id="si_email" inputmode="email" autocapitalize="off" autocorrect="off" placeholder="you@email.com"><button class="sibtn" onclick="signIn()">Send link</button></div>';
+      acct += '<input class="fullinput" id="si_email" inputmode="email" autocapitalize="off" autocorrect="off" placeholder="you@email.com">';
+      acct += '<div class="sirow"><input id="si_pw" type="password" placeholder="Password"><button class="sibtn" onclick="signInPw()">Sign in</button></div>';
+      acct += '<button class="silink" onclick="signUpPw()">New? Create account with these details</button>';
     }
     acct += '</div>';
   }
@@ -1503,6 +1587,7 @@ function renderProgress(){
   if (auth){
     h += '<p class="statline ok">Signed in as '+esc(auth.email||auth.uid)+(programName?' \u00B7 '+esc(programName):'')+'</p>';
     h += '<p class="statline">Every saved workout syncs to your account automatically. Sign in on any device to pick up your full history.</p>';
+    h += '<div class="field"><label for="newpw">Change password</label><div class="sirow"><input id="newpw" type="password" placeholder="New password (8+ chars)"><button class="sibtn" onclick="changePw()">Update</button></div></div>';
     h += '<div class="btngrid"><button class="abtn" onclick="pushLog().then(()=>toast(\'Synced.\'))">Sync now</button><button class="abtn" onclick="signOut()">Sign out</button>';
   } else {
     h += '<p class="statline">Not signed in \u2014 data lives on this device only. Sign in from the card at the top of Session.</p>';
@@ -1517,15 +1602,21 @@ function renderProgress(){
 function renderWelcome(){
   let h = '<div class="welcome a">';
   h += '<div class="wmark disp">Iron Log</div>';
-  if (signinSent){
-    h += '<div class="sit disp">Check your email</div>'
-      +'<p class="sic">Sign-in link sent to <b>'+esc(signinSent)+'</b>. Open it on <b>this phone</b> and you\u2019ll land back here, signed in and ready to train. Links are single-use and expire in about an hour \u2014 always tap the newest one.</p>'
-      +'<button class="silink" onclick="signinSent=null;render()">Use a different email</button>';
-  } else {
-    h += '<div class="sit disp">Let\u2019s get you set up</div>'
-      +'<p class="sic">One-time sign-in \u2014 no password. Your log follows you to any device, and your coach sees your progress.</p>'
+  if (authMode==="create"){
+    h += '<div class="sit disp">Create your account</div>'
+      +'<p class="sic">Your log follows you to any device, and your coach sees your progress.</p>'
       +'<div class="namerow"><input id="si_first" placeholder="First name" autocomplete="given-name"><input id="si_last" placeholder="Last name" autocomplete="family-name"></div>'
-      +'<div class="sirow"><input id="si_email" inputmode="email" autocapitalize="off" autocorrect="off" placeholder="you@email.com" autocomplete="email"><button class="sibtn" onclick="signIn()">Send link</button></div>'
+      +'<input class="fullinput" id="si_email" inputmode="email" autocapitalize="off" autocorrect="off" placeholder="you@email.com" autocomplete="email">'
+      +'<div class="sirow"><input id="si_pw" type="password" placeholder="Password (8+ characters)" autocomplete="new-password"><button class="sibtn" onclick="signUpPw()">Create</button></div>'
+      +'<button class="silink" onclick="authMode=\'signin\';render()">Already have an account? Sign in</button>'
+      +'<button class="silink skiplink" onclick="skipSignIn()">Skip for now \u2014 use on this device only</button>';
+  } else {
+    h += '<div class="sit disp">Sign in</div>'
+      +'<p class="sic">Welcome back \u2014 pick up right where you left off.</p>'
+      +'<input class="fullinput" id="si_email" inputmode="email" autocapitalize="off" autocorrect="off" placeholder="you@email.com" autocomplete="email">'
+      +'<div class="sirow"><input id="si_pw" type="password" placeholder="Password" autocomplete="current-password"><button class="sibtn" onclick="signInPw()">Sign in</button></div>'
+      +'<button class="silink" onclick="authMode=\'create\';render()">New here? Create an account</button>'
+      +'<button class="silink" onclick="forgotPw()">Forgot password?</button>'
       +'<button class="silink skiplink" onclick="skipSignIn()">Skip for now \u2014 use on this device only</button>';
   }
   h += '</div>';

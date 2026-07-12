@@ -531,7 +531,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "8.8";
+const APP_VERSION = "8.9";
 
 let auth = null;      // {at, rt, exp, uid, email}
 let profile = null;   // {display_name, is_coach, program_id}
@@ -737,6 +737,7 @@ async function choosePath(key){
     const p = await sb("/rest/v1/profiles?user_id=eq."+auth.uid, { method:"PATCH", body:{ program_id: rows[0].id } });
     if (!p.ok) throw 0;
     profile.program_id = rows[0].id;
+    pathSex = null;
     await loadProgram();
     toast("Path set \u2014 "+rows[0].name+".");
     render();
@@ -746,6 +747,7 @@ function coachTab(){ setTab("coach"); }
 
 // ---------- boot ----------
 let signinSent = null;
+let pathSex = null;
 let localOnly = false;
 try { localOnly = localStorage.getItem("iron-log-local-ok")==="1"; } catch(e){}
 function skipSignIn(){
@@ -1012,14 +1014,24 @@ function renderTrain(){
   }
   // ===== Path picker (signed in, no program assigned) =====
   if (auth && profile && !profile.program_id){
-    acct += '<div class="signin a"><div class="sit disp">Choose your path</div>'
-      +'<p class="sic">Pick the track that fits \u2014 your coach can adjust it anytime. Until then you\u2019re on the default program.</p>'
-      +'<div class="pathgrid">'
-      +'<button class="pathbtn" onclick="choosePath(\'male_muscle\')"><span class="disp">Male</span><span>Lean muscle</span></button>'
-      +'<button class="pathbtn" onclick="choosePath(\'male_fat\')"><span class="disp">Male</span><span>Lose fat</span></button>'
-      +'<button class="pathbtn" onclick="choosePath(\'female_muscle\')"><span class="disp">Female</span><span>Lean muscle</span></button>'
-      +'<button class="pathbtn" onclick="choosePath(\'female_fat\')"><span class="disp">Female</span><span>Lose fat</span></button>'
-      +'</div></div>';
+    acct += '<div class="signin a">';
+    if (!pathSex){
+      acct += '<div class="sit disp">Step 1 of 2</div>'
+        +'<p class="sic">Which track are you on? Your coach can adjust anything later.</p>'
+        +'<div class="pathgrid">'
+        +'<button class="pathbtn" onclick="pathSex=\'male\';render()"><span class="disp">Male</span></button>'
+        +'<button class="pathbtn" onclick="pathSex=\'female\';render()"><span class="disp">Female</span></button>'
+        +'</div>';
+    } else {
+      acct += '<div class="sit disp">Step 2 of 2</div>'
+        +'<p class="sic">What\u2019s the goal right now?</p>'
+        +'<div class="pathgrid">'
+        +'<button class="pathbtn" onclick="choosePath(pathSex+\'_muscle\')"><span class="disp">Lean muscle</span><span>Build strength &amp; size</span></button>'
+        +'<button class="pathbtn" onclick="choosePath(pathSex+\'_fat\')"><span class="disp">Lose fat</span><span>Cut while keeping muscle</span></button>'
+        +'</div>'
+        +'<button class="silink skiplink" onclick="pathSex=null;render()">\u2190 Back</button>';
+    }
+    acct += '</div>';
   }
   // ===== Briefing card (primary) =====
   let h = acct + '<div class="brief a">';

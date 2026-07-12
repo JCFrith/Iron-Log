@@ -482,6 +482,29 @@
   .tr.dn { color:var(--danger); }
   .tr.flat { color:var(--faint); }
   .tr.new { color:var(--accent-hi); font-size:10px; letter-spacing:.08em; }
+  .mini { font-size:10px; font-weight:900; }
+  .mini.up { color:var(--ok); } .mini.down { color:var(--danger); }
+  .heat { display:flex; gap:5px; }
+  .hb { flex:1; height:22px; border-radius:6px; background:rgba(255,255,255,.05); }
+  .hb.h1 { background:rgba(var(--accent-rgb),.28); }
+  .hb.h2 { background:rgba(var(--accent-rgb),.55); }
+  .hb.h3 { background:var(--accent); }
+  .gbar { display:flex; align-items:center; gap:9px; margin-bottom:8px; }
+  .gn { flex:none; width:88px; font-size:12px; font-weight:800; color:var(--dim); }
+  .gtrack { flex:1; height:9px; border-radius:99px; background:rgba(255,255,255,.05); overflow:hidden; }
+  .gfill { display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,var(--accent-deep),var(--accent-hi)); }
+  .gp { flex:none; width:36px; text-align:right; color:var(--text); font-size:12px; font-weight:800; }
+  .menuitem {
+    width:100%; min-height:46px; margin-top:14px; border-radius:13px;
+    border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text);
+    font-weight:800; font-size:14px;
+  }
+  .platerow { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
+  .plate {
+    border:1px solid rgba(var(--accent-rgb),.4); background:rgba(var(--accent-rgb),.1);
+    color:var(--text); border-radius:12px; padding:10px 13px; font-size:14px; font-weight:800;
+  }
+  .plate b { color:var(--accent-hi); }
   .toast {
     position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); z-index:50;
     max-width:calc(100% - 32px); padding:10px 16px; border-radius:999px;
@@ -595,7 +618,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.7";
+const APP_VERSION = "9.8";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -946,6 +969,41 @@ async function changePw(){
 
 // ---------- boot ----------
 let menuOpen = false;
+let plateOpen = false, plateW = "", plateBar = 45;
+function togglePlates(){ plateOpen = !plateOpen; menuOpen=false; render(); }
+function plateCalc(target, bar){
+  const PLATES=[45,35,25,10,5,2.5];
+  let side = (target-bar)/2;
+  if (target<=0 || side<0) return null;
+  const out=[]; 
+  for (const p of PLATES){ const n=Math.floor(side/p+1e-9); if(n>0){ out.push({p,n}); side=+(side-n*p).toFixed(2); } }
+  return {plates:out, rem:side};
+}
+function renderPlates(){
+  let h = '<div class="menuback" onclick="togglePlates()"></div>';
+  h += '<div class="sheet" role="dialog" aria-label="plate calculator" style="max-height:80vh">';
+  h += '<div class="sheethead"><span class="sheettitle disp">Plate calculator</span><span class="sheetsub">Per-side loading</span></div>';
+  h += '<div class="namerow" style="margin-bottom:10px"><input id="pc_w" inputmode="decimal" placeholder="Target weight" value="'+esc(plateW)+'" onchange="plateW=this.value;render()">'
+    +'<select class="progsel" onchange="plateBar=Number(this.value);render()">'
+    +'<option value="45"'+(plateBar===45?' selected':'')+'>45 lb bar</option>'
+    +'<option value="35"'+(plateBar===35?' selected':'')+'>35 lb bar</option>'
+    +'<option value="0"'+(plateBar===0?' selected':'')+'>Plate-loaded (no bar)</option>'
+    +'</select></div>';
+  const t = Number(plateW)||0;
+  if (t>0){
+    const res = plateCalc(t, plateBar);
+    if (!res) h += '<p class="statline">Target is below the bar weight.</p>';
+    else {
+      h += '<div class="platerow">';
+      if (!res.plates.length) h += '<p class="statline">Empty bar.</p>';
+      res.plates.forEach(x=>{ h += '<span class="plate"><b class="num">'+x.n+'\u00D7</b> '+x.p+'</span>'; });
+      h += '</div>';
+      if (res.rem>0) h += '<p class="statline">'+res.rem+' lb per side unloadable with standard plates \u2014 nearest is '+ (t - res.rem*2) +' lb.</p>';
+    }
+  } else h += '<p class="statline">Enter the target weight \u2014 e.g. your next set\u2019s load.</p>';
+  h += '</div>';
+  return h;
+}
 function toggleMenu(){ menuOpen = !menuOpen; render(); }
 function renderMenu(){
   let h = '<div class="menuback" onclick="toggleMenu()"></div>';
@@ -955,6 +1013,7 @@ function renderMenu(){
   for (const [k,nm] of Object.entries(THEMES))
     h += '<button class="themebtn'+(k===theme?" on":"")+'" onclick="setTheme(\''+k+'\')"><span class="sw sw-'+k+'"></span>'+nm+'</button>';
   h += '</div>';
+  h += '<button class="menuitem" onclick="togglePlates()">\u2696 Plate calculator</button>';
   if (auth) h += '<button class="menuout" onclick="menuOpen=false;signOut()">Sign out</button>';
   h += '<p class="menuver num">Iron Log v'+APP_VERSION+'</p>';
   h += '</div>';
@@ -1009,6 +1068,7 @@ let progressEx = "leg-press";
 let adjustOpen = null;
 let subs = {};       // slotKey -> substitute lift name (per session)
 let pickerFor = null; // prescribed exercise id whose picker is open
+let progLift = null;  // lift detail open in Progress
 const DRAFT_KEY = "iron-log-draft";
 const DRAFT_TTL = 12*3600*1000;
 function saveDraft(){
@@ -1123,6 +1183,85 @@ function isStalled(exId){
   const best = h.map(x=>Math.max(...x.sets.map(s=>s.r)));
   return best[0] <= best[2];
 }
+// ================= Analytics =================
+function e1rm(w,r){ return r>0 && w>0 ? Math.round(w*(1+r/30)) : 0; }
+function catOf(exId){
+  for (const w of Object.values(WORKOUTS)) for (const e of w.exercises) if (e.id===exId && e.cat) return e.cat;
+  for (const [cat,list] of Object.entries(LIB)) if (list.some(n=>slug(n)===exId)) return cat;
+  return null;
+}
+const CAT_GROUP = { quads:"Quads", hams:"Hamstrings", glutes:"Glutes",
+  chest_press:"Chest", incline_press:"Chest", chest_fly:"Chest",
+  row:"Back", vert_pull:"Back",
+  sh_press:"Shoulders", side_delt:"Shoulders", rear_delt:"Shoulders",
+  biceps:"Biceps", triceps:"Triceps", calves:"Calves", abs:"Core" };
+function groupOf(exId){ const c=catOf(exId); return (c && CAT_GROUP[c]) || "Other"; }
+function summaryStats(days){
+  const cutoff = Date.now()-days*86400000, prevCut = Date.now()-2*days*86400000;
+  const mk = ()=>({workouts:0,sets:0,reps:0,vol:0});
+  const cur=mk(), prev=mk();
+  for (const s of sessions){
+    const t = new Date(s.date).getTime();
+    const b = t>=cutoff ? cur : (t>=prevCut ? prev : null);
+    if (!b) continue;
+    b.workouts++;
+    Object.values(s.entries||{}).forEach(sets=>sets.forEach(x=>{ b.sets++; b.reps+=x.r; b.vol+=(x.w||0)*x.r; }));
+  }
+  return {cur, prev};
+}
+function prLog(){
+  const best = {}; const out = [];
+  for (const s of sessions){
+    if (s.deload) continue;
+    for (const [id,sets] of Object.entries(s.entries||{})){
+      const top = Math.max(...sets.map(x=>x.w||0));
+      if (top<=0) continue;
+      if (best[id]===undefined){ best[id]=top; continue; } // baseline isn't a PR
+      if (top>best[id]){
+        const set = sets.find(x=>x.w===top);
+        out.push({date:s.date, id, name:exDisplayName(id), w:top, r:set?set.r:0});
+        best[id]=top;
+      }
+    }
+  }
+  return out;
+}
+function consistencyWeeks(n){
+  const out=[]; const now=new Date(); const day=(now.getDay()+6)%7;
+  now.setDate(now.getDate()-day); now.setHours(0,0,0,0);
+  for (let i=n-1;i>=0;i--){
+    const wkStart=new Date(now.getTime()-i*7*86400000);
+    const key=wkStart.toISOString().slice(0,10);
+    out.push({key, n:sessions.filter(s=>weekKey(s.date)===key).length});
+  }
+  return out;
+}
+function groupVolume(days){
+  const cutoff = Date.now()-days*86400000;
+  const g = {};
+  let total=0;
+  for (const s of sessions){
+    if (new Date(s.date).getTime()<cutoff) continue;
+    for (const [id,sets] of Object.entries(s.entries||{})){
+      const grp = groupOf(id);
+      const v = sets.reduce((a,x)=>a+(x.w||0)*x.r,0) || sets.reduce((a,x)=>a+x.r,0); // bw lifts count reps
+      g[grp]=(g[grp]||0)+v; total+=v;
+    }
+  }
+  return Object.entries(g).map(([name,v])=>({name, v, pct: total? Math.round(v/total*100) : 0}))
+    .sort((a,b)=>b.v-a.v);
+}
+function liftAnalytics(exId){
+  const rows=[]; // per session (all-time, all programs), excluding nothing for table
+  for (const s of sessions){
+    const sets = s.entries && s.entries[exId];
+    if (!sets || !sets.length) continue;
+    const topW = Math.max(...sets.map(x=>x.w||0));
+    const bestSet = sets.reduce((a,x)=> e1rm(x.w,x.r)>e1rm(a.w,a.r)?x:a, sets[0]);
+    rows.push({date:s.date, sets, topW, bestR:Math.max(...sets.map(x=>x.r)), e1:s.deload?null:e1rm(bestSet.w,bestSet.r), deload:!!s.deload});
+  }
+  return rows;
+}
 function weeklyVolumes(){
   const byWeek={};
   for (const s of sessions){
@@ -1147,7 +1286,7 @@ function findEx(exId){
 
 // ================= Render =================
 function setTab(t){
-  tab=t; adjustOpen=null; if (t!=="coach") coachView=null;
+  tab=t; adjustOpen=null; if (t!=="coach") coachView=null; if (t!=="progress") progLift=null;
   ["train","progress","coach"].forEach(x=>{
     const b=document.getElementById("tab-"+x);
     if (b) b.className = (x===t?"on":"");
@@ -1174,7 +1313,7 @@ function render(){
   lastTabRendered = tab;
   m.innerHTML = ((!auth && !localOnly) ? renderWelcome()
     : tab==="train" ? renderTrain() : tab==="coach" ? renderCoach() : renderProgress())
-    + (menuOpen ? renderMenu() : "");
+    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "");
   if (tab==="progress") setTimeout(animateArea, 30);
 }
 
@@ -1651,14 +1790,80 @@ function svgLine(data){
   return s+'</svg>';
 }
 
+function fmtK(v){ return v>=1000?(v/1000).toFixed(1)+"k":Math.round(v); }
+function statCell(label, val, delta){
+  return '<div class="bm"><span class="v num">'+val+(delta!==null&&delta!==undefined?' <span class="mini '+(delta>=0?"up":"down")+'">'+(delta>=0?"\u2191":"\u2193")+Math.abs(delta)+'%</span>':'')+'</span><span class="l">'+label+'</span></div>';
+}
+function pctDelta(c,p){ return p>0 ? Math.round((c-p)/p*100) : null; }
+function renderLiftDetail(){
+  const e = findEx(progLift) || {id:progLift, name:exDisplayName(progLift), bw:false};
+  const rows = liftAnalytics(progLift);
+  let h = '<button class="silink" onclick="progLift=null;render()">\u2190 All lifts</button>';
+  h += '<h2 class="sect disp a">'+esc(e.name)+'</h2>';
+  const bw = rows.length && rows.every(r=>r.topW===0);
+  // chart: top-set weight (or best reps for bw)
+  const chart = rows.map(r=>({label:fmtDate(r.date), value: bw? r.bestR : r.topW}));
+  const e1s = rows.filter(r=>r.e1).map(r=>r.e1);
+  const curE1 = e1s.length?e1s[e1s.length-1]:null;
+  const prevE1 = e1s.length>1?e1s[e1s.length-2]:null;
+  h += '<div class="panel a"><div class="volhead"><span class="vh disp num">'+(rows.length? (bw? rows[rows.length-1].bestR+(" reps") : rows[rows.length-1].topW+" lb") : "\u2013")+'</span>'
+    +(curE1?'<span class="delta num '+(prevE1&&curE1<prevE1?"down":"up")+'">e1RM '+curE1+(prevE1?(curE1>=prevE1?' \u2191':' \u2193'):'')+'</span>':'')
+    +'</div>'+svgLine(chart.slice(-16))
+    +'<p class="statline">'+(bw?'Best reps per session':'Top set per session')+(curE1?' \u00B7 e1RM (Epley) from best set, deloads excluded':'')+'</p></div>';
+  // PR history for this lift
+  const prs = prLog().filter(p=>p.id===progLift).reverse();
+  if (prs.length){
+    h += '<h2 class="sect disp a">PR history</h2><div class="panel a"><div class="trendrows">';
+    prs.slice(0,8).forEach(p=>{ h += '<div class="trow"><span class="d">'+fmtDate(p.date)+'</span><span class="s num">'+p.w+'\u00D7'+p.r+' \u00B7 e1RM '+e1rm(p.w,p.r)+'</span></div>'; });
+    h += '</div></div>';
+  }
+  // full session table
+  h += '<h2 class="sect disp a">Every session</h2><div class="panel a"><div class="trendrows">';
+  [...rows].reverse().slice(0,30).forEach(r=>{
+    h += '<div class="trow"><span class="d">'+fmtDate(r.date)+(r.deload?' \u00B7 DL':'')+'</span><span class="s num">'+r.sets.map(s=>bw? s.r : s.w+'\u00D7'+s.r).join('&nbsp;&nbsp;')+'</span></div>';
+  });
+  h += '</div></div>';
+  return h;
+}
 function renderProgress(){
+  if (progLift) return renderLiftDetail();
   const vols = weeklyVolumes();
   const recent = vols.slice(-10);
   const cur = recent.length?recent[recent.length-1].value:0;
   const prev = recent.length>1?recent[recent.length-2].value:0;
   const delta = prev>0 ? Math.round((cur-prev)/prev*100) : null;
 
-  let h = '<h2 class="sect disp a">Weekly volume</h2>';
+  const S = summaryStats(30);
+  let h = '<h2 class="sect disp a">Last 30 days</h2>';
+  h += '<div class="panel a"><div class="bmetrics" style="margin:0 0 10px">'
+    + statCell("Workouts", S.cur.workouts, pctDelta(S.cur.workouts,S.prev.workouts))
+    + statCell("Sets", S.cur.sets, pctDelta(S.cur.sets,S.prev.sets))
+    + statCell("Volume", fmtK(S.cur.vol), pctDelta(S.cur.vol,S.prev.vol))
+    +'</div>';
+  const weeks = consistencyWeeks(12);
+  h += '<div class="heat">';
+  weeks.forEach(w=>{ const lvl = w.n>=WEEK_TARGET?3:w.n>=Math.ceil(WEEK_TARGET/2)?2:w.n>0?1:0;
+    h += '<span class="hb h'+lvl+'" title="'+w.key+': '+w.n+'"></span>'; });
+  h += '</div><p class="statline">12-week consistency \u00B7 vs prior 30 days</p></div>';
+
+  const gv = groupVolume(30);
+  if (gv.length){
+    h += '<h2 class="sect disp a">Muscle groups \u2014 30 days</h2><div class="panel a">';
+    const maxv = gv[0].v||1;
+    gv.forEach(g=>{
+      h += '<div class="gbar"><span class="gn">'+esc(g.name)+'</span><span class="gtrack"><span class="gfill" style="width:'+Math.max(4,Math.round(g.v/maxv*100))+'%"></span></span><span class="gp num">'+g.pct+'%</span></div>';
+    });
+    h += '</div>';
+  }
+
+  const prs = prLog().reverse().slice(0,8);
+  if (prs.length){
+    h += '<h2 class="sect disp a">Recent PRs</h2><div class="panel a"><div class="trendrows">';
+    prs.forEach(p=>{ h += '<div class="trow"><span class="d">'+fmtDate(p.date)+' \u00B7 '+esc(p.name)+'</span><span class="s num">'+p.w+'\u00D7'+p.r+'</span></div>'; });
+    h += '</div></div>';
+  }
+
+  h += '<h2 class="sect disp a">Weekly volume</h2>';
   h += '<div class="panel a"><div class="volhead"><span class="vh disp num">'+(cur>=1000?(cur/1000).toFixed(1)+"k":cur)+' lb</span>'
     +(delta!==null?'<span class="delta num '+(delta>=0?"up":"down")+'">'+(delta>=0?"\u2191 +":"\u2193 ")+delta+'% wk/wk</span>':'')
     +'</div>'+areaChart(recent)+'</div>';
@@ -1678,7 +1883,7 @@ function renderProgress(){
   if (cards.length){
     h += '<h2 class="sect disp a">Lifts \u2014 tap to explore</h2><div class="sparkrow">';
     cards.forEach((c,i)=>{
-      h += '<button class="spark a'+(c.id===progressEx?" on":"")+'" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="setProgressEx(\''+c.id+'\')">'
+      h += '<button class="spark a'+(c.id===progressEx?" on":"")+'" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="progLift=\''+c.id+'\';render()">'
         +'<div class="sn">'+esc(c.name)+'</div><div class="sv num">'+c.latest+'</div>'
         +'<div class="sd num '+(c.d>0?"up":"flat")+'">'+(c.d>0?"\u2191 +"+c.d+" lb":c.d<0?"\u2193 "+c.d+" lb":"\u2192 holding")+'</div>'
         +sparkSvg(c.vals)+'</button>';

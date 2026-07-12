@@ -469,6 +469,19 @@
   .themebtn.on { border-color:var(--accent); color:var(--text); }
   .sw { width:14px; height:14px; border-radius:99px; }
   .sw-ember{background:#ea580c} .sw-rose{background:#ec4899} .sw-ocean{background:#3b82f6} .sw-forest{background:#10b981} .sw-crimson{background:#ef4444}
+  .coachcard:active { transform:scale(.99); }
+  .lifttab { width:100%; border-collapse:collapse; }
+  .lifttab th { text-align:left; color:var(--faint); font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; padding:0 6px 8px 0; }
+  .lifttab td { padding:9px 6px 9px 0; border-top:1px solid var(--border); vertical-align:top; }
+  .lifttab .ln { font-weight:800; font-size:13.5px; max-width:38vw; }
+  .lifttab .lnote { display:block; margin-top:3px; color:#cfa27e; font-size:11px; font-weight:600; }
+  .lifttab .sets { color:var(--dim); font-size:13px; white-space:normal; }
+  .lifttab .trc { text-align:right; width:34px; }
+  .tr { font-size:12px; font-weight:900; }
+  .tr.up { color:var(--ok); }
+  .tr.dn { color:var(--danger); }
+  .tr.flat { color:var(--faint); }
+  .tr.new { color:var(--accent-hi); font-size:10px; letter-spacing:.08em; }
   .toast {
     position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); z-index:50;
     max-width:calc(100% - 32px); padding:10px 16px; border-radius:999px;
@@ -582,7 +595,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.6";
+const APP_VERSION = "9.7";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -770,6 +783,34 @@ function updateNetBadge(){
 
 // ---------- coach ----------
 let coachData = null;
+let coachView = null; // {uid, sessId}
+function openAthlete(uid){
+  const a = coachData && coachData.athletes.find(x=>x.uid===uid);
+  if (!a || !a.sessions.length){ toast("No sessions logged yet."); return; }
+  coachView = { uid, sessId: a.sessions[a.sessions.length-1].id };
+  render();
+}
+function closeAthlete(){ coachView = null; render(); }
+function pickAthleteSession(id){ if (coachView){ coachView.sessId = Number(id); render(); } }
+function exDisplayName(id){ return LIBNAME[id] || id.replace(/-/g," ").replace(/\b\w/g,c=>c.toUpperCase()); }
+function prevEntryIn(ss, beforeIdx, exId){
+  for (let i=beforeIdx-1;i>=0;i--){
+    const sets = ss[i].entries && ss[i].entries[exId];
+    if (sets && sets.length) return sets;
+  }
+  return null;
+}
+function trendMark(cur, prev){
+  if (!prev) return '<span class="tr new">new</span>';
+  const tw = s=>Math.max(...s.map(x=>x.w||0)), trp = s=>Math.max(...s.map(x=>x.r||0));
+  const cw=tw(cur), pw=tw(prev);
+  if (cw>pw) return '<span class="tr up">\u25B2</span>';
+  if (cw<pw) return '<span class="tr dn">\u25BC</span>';
+  const cr=trp(cur), pr=trp(prev);
+  if (cr>pr) return '<span class="tr up">\u25B2</span>';
+  if (cr<pr) return '<span class="tr dn">\u25BC</span>';
+  return '<span class="tr flat">\u2013</span>';
+}
 async function loadCoach(){
   const [pr, lr, gr] = await Promise.all([
     sb("/rest/v1/profiles?select=user_id,display_name,program_id"),
@@ -790,7 +831,7 @@ async function loadCoach(){
       });
       let lastNote = null;
       for (let i=ss.length-1;i>=0;i--){ if (ss[i].note){ lastNote={t:ss[i].note, d:ss[i].date}; break; } }
-      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote };
+      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss };
     }), programs: progs };
 }
 async function assignProgram(uid, pid){
@@ -1106,7 +1147,7 @@ function findEx(exId){
 
 // ================= Render =================
 function setTab(t){
-  tab=t; adjustOpen=null;
+  tab=t; adjustOpen=null; if (t!=="coach") coachView=null;
   ["train","progress","coach"].forEach(x=>{
     const b=document.getElementById("tab-"+x);
     if (b) b.className = (x===t?"on":"");
@@ -1715,16 +1756,50 @@ function renderWelcome(){
   h += '</div>';
   return h;
 }
+function renderAthleteDetail(){
+  const a = coachData.athletes.find(x=>x.uid===coachView.uid);
+  if (!a) { coachView=null; return renderCoach(); }
+  const ss = a.sessions;
+  let idx = ss.findIndex(s=>s.id===coachView.sessId);
+  if (idx<0) idx = ss.length-1;
+  const s = ss[idx];
+  let h = '<button class="silink" onclick="closeAthlete()">\u2190 Roster</button>';
+  h += '<h2 class="sect disp a">'+esc(a.name)+'</h2>';
+  // session selector
+  h += '<div class="panel a"><div class="field"><label>Session</label><select class="progsel" onchange="pickAthleteSession(this.value)">';
+  for (let i=ss.length-1;i>=0;i--){
+    const x=ss[i]; let vol=0;
+    Object.values(x.entries||{}).forEach(sets=>sets.forEach(e=>{vol+=(e.w||0)*e.r;}));
+    h += '<option value="'+x.id+'"'+(i===idx?' selected':'')+'>'+fmtDate(x.date)+' \u00B7 '+esc(x.workout)+(x.deload?' \u00B7 deload':'')+' \u00B7 '+(vol>=1000?(vol/1000).toFixed(1)+'k':Math.round(vol))+' lb</option>';
+  }
+  h += '</select></div>';
+  if (s.deload) h += '<p class="statline">Deload session \u2014 planned half loads; dips here are by design.</p>';
+  if (s.note) h += '<p class="hnote">\u270E '+esc(s.note)+'</p>';
+  h += '</div>';
+  // lift table
+  h += '<div class="panel a"><table class="lifttab"><thead><tr><th>Lift</th><th>Sets</th><th></th></tr></thead><tbody>';
+  for (const [exId, sets] of Object.entries(s.entries||{})){
+    const prev = prevEntryIn(ss, idx, exId);
+    const bw = sets.every(x=>!x.w);
+    h += '<tr><td class="ln">'+esc(exDisplayName(exId))
+      +((s.exNotes&&s.exNotes[exId])?'<span class="lnote">\u270E '+esc(s.exNotes[exId])+'</span>':'')
+      +'</td><td class="num sets">'+sets.map(x=>bw? x.r : (x.w+"\u00D7"+x.r)).join(" \u00B7 ")+'</td>'
+      +'<td class="trc">'+(s.deload?'<span class="tr flat">DL</span>':trendMark(sets, prev))+'</td></tr>';
+  }
+  h += '</tbody></table></div>';
+  return h;
+}
 function renderCoach(){
   if (!coachData) return '<div class="panel a"><p class="empty">Loading roster\u2026</p></div>';
+  if (coachView) return renderAthleteDetail();
   let h = '<h2 class="sect disp a">Roster \u2014 '+coachData.athletes.length+' athlete'+(coachData.athletes.length===1?'':'s')+'</h2>';
   coachData.athletes.forEach((a,i)=>{
-    h += '<div class="panel a" style="animation-delay:'+(Math.min(i,8)*22)+'ms">';
+    h += '<div class="panel a coachcard" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="openAthlete(\''+a.uid+'\')">';
     h += '<div class="volhead"><span class="vh disp" style="font-size:19px">'+esc(a.name)+'</span>'
       +'<span class="delta num '+(a.wkN>=WEEK_TARGET?"up":"down")+'">'+a.wkN+'/'+WEEK_TARGET+' this wk</span></div>';
     h += '<p class="statline num">'+(a.last?("Last trained "+fmtDate(a.last)):"Never trained")+' \u00B7 '+a.total+' sessions \u00B7 '+(a.wkVol>=1000?(a.wkVol/1000).toFixed(1)+"k":a.wkVol)+' lb this week</p>';
     if (a.lastNote) h += '<p class="hnote">\u270E '+esc(a.lastNote.t)+' <span style="color:var(--faint)">('+fmtDate(a.lastNote.d)+')</span></p>';
-    h += '<div class="field" style="margin-top:10px"><label>Program</label><select class="progsel" onchange="assignProgram(\''+a.uid+'\', this.value)">';
+    h += '<div class="field" style="margin-top:10px" onclick="event.stopPropagation()"><label>Program</label><select class="progsel" onchange="assignProgram(\''+a.uid+'\', this.value)">';
     h += '<option value=""'+(a.program_id?'':' selected')+'>\u2014 none (built-in default)</option>';
     coachData.programs.forEach(p=>{ h += '<option value="'+p.id+'"'+(p.id===a.program_id?' selected':'')+'>'+esc(p.name)+'</option>'; });
     h += '</select></div></div>';

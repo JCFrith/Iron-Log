@@ -582,7 +582,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.5";
+const APP_VERSION = "9.6";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -822,6 +822,7 @@ async function afterAuth(){
     await ensureProfile();
     await loadProgram();
     const added = await pullMergePush();
+    if (tagLegacySessions()) pushLog();
     netState="live"; updateNetBadge();
     if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
     if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
@@ -1006,11 +1007,22 @@ function scheduleFor(dow){
 }
 let workoutId = scheduleFor(new Date().getDay()) || "A";
 
+// ================= Program-scoped history =================
+function curProg(){ return (profile && profile.program_id) ? profile.program_id : "builtin"; }
+function sameProg(s){ return (s.prog === undefined) || s.prog === curProg(); }
+// tag untagged legacy sessions to the current program once (run after profile known)
+function tagLegacySessions(){
+  let changed = false;
+  for (const s of sessions) if (s.prog === undefined){ s.prog = curProg(); changed = true; }
+  if (changed) persist();
+  return changed;
+}
 // ================= Intelligence =================
 const fmtDate = iso => new Date(iso).toLocaleDateString(undefined,{month:"short",day:"numeric"});
 function weekKey(iso){ const d=new Date(iso); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
 function lastEntryFor(exId){
   for (let i=sessions.length-1;i>=0;i--){
+    if (!sameProg(sessions[i])) continue;
     const sets = sessions[i].entries && sessions[i].entries[exId];
     if (sets && sets.some(s=>s.r>0)) return {sets:sets.filter(s=>s.r>0), date:sessions[i].date};
   }
@@ -1019,6 +1031,7 @@ function lastEntryFor(exId){
 function historyFor(exId, n){
   const out=[];
   for (let i=sessions.length-1;i>=0 && out.length<n;i--){
+    if (!sameProg(sessions[i])) continue;
     const sets = sessions[i].entries && sessions[i].entries[exId];
     if (sets && sets.length) out.push({sets, date:sessions[i].date});
   }
@@ -1487,7 +1500,7 @@ function saveSession(){
     }
   }
   if (!logged){ toast("Nothing to save \u2014 confirm at least one set."); return; }
-  const sess = {id:Date.now(), date:new Date().toISOString(), workout:workoutId, entries};
+  const sess = {id:Date.now(), date:new Date().toISOString(), workout:workoutId, entries, prog:curProg()};
   if (isDl) sess.deload = true;
   if (sessionNote.trim()) sess.note = sessionNote.trim();
   const exN = {};

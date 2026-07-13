@@ -681,7 +681,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "10.3";
+const APP_VERSION = "11.0";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -886,12 +886,51 @@ let coachData = null;
 let myCoachNotes = [];      // notes addressed to me (athlete)
 let whoopRec = null;        // my recovery cache row
 const WHOOP_FN = SUPA + "/functions/v1/whoop-callback";
+let whoopDays = [];   // my 30d history
 async function loadWhoop(){
   if (!auth) return;
   try {
     const r = await sb("/rest/v1/whoop_recovery?select=*&user_id=eq."+auth.uid);
     if (r.ok){ const rows = await r.json(); whoopRec = rows[0] || null; }
+    const d = await sb("/rest/v1/whoop_days?select=*&user_id=eq."+auth.uid+"&order=day.asc");
+    if (d.ok) whoopDays = await d.json();
   } catch(e){}
+}
+function avgOf(rows, f, n){
+  const v = rows.slice(-n).map(r=>r[f]).filter(x=>x!=null);
+  return v.length ? Math.round(v.reduce((a,b)=>a+b,0)/v.length*10)/10 : null;
+}
+function trendArrow(rows, f){
+  const recent = avgOf(rows, f, 7), prior = avgOf(rows.slice(0,-7), f, 7);
+  if (recent==null || prior==null) return "";
+  const d = recent - prior;
+  const pct = prior ? Math.abs(d/prior*100) : 0;
+  if (pct < 3) return '<span class="tr flat">\u2013</span>';
+  return d>0 ? '<span class="tr up">\u25B2</span>' : '<span class="tr dn">\u25BC</span>';
+}
+function whoopPanel(rows, title){
+  if (!rows || rows.length<2) return "";
+  let h = '<h2 class="sect disp a">'+title+'</h2><div class="panel a">';
+  h += '<div class="bmetrics" style="margin:0 0 12px">'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"recovery_score",7)??"\u2013")+'% '+trendArrow(rows,"recovery_score")+'</span><span class="l">Recovery 7d</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"hrv",7)??"\u2013")+' '+trendArrow(rows,"hrv")+'</span><span class="l">HRV 7d</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h '+trendArrow(rows,"sleep_hours")+'</span><span class="l">Sleep 7d</span></div>'
+    + '</div>';
+  h += svgLine(rows.slice(-30).map(r=>({label:fmtDate(r.day), value:r.recovery_score||0})));
+  h += '<p class="statline">Recovery, last 30 days</p>';
+  // sleep + strain detail
+  const last = rows[rows.length-1];
+  const bits = [];
+  if (last.sleep_performance!=null) bits.push("sleep performance <b>"+Math.round(last.sleep_performance)+"%</b>");
+  if (last.sleep_efficiency!=null) bits.push("efficiency <b>"+Math.round(last.sleep_efficiency)+"%</b>");
+  if (last.sleep_debt_hours) bits.push("debt <b>"+last.sleep_debt_hours+"h</b>");
+  if (last.disturbances!=null) bits.push("<b>"+last.disturbances+"</b> disturbances");
+  if (last.strain!=null) bits.push("day strain <b>"+last.strain+"</b>");
+  if (bits.length) h += '<p class="statline">Last night: '+bits.join(" \u00B7 ")+'</p>';
+  const debtAvg = avgOf(rows,"sleep_debt_hours",7);
+  if (debtAvg && debtAvg>=0.5) h += '<p class="statline" style="color:var(--warn)">Averaging '+debtAvg+'h of sleep debt \u2014 the most likely cap on recovery right now.</p>';
+  h += '</div>';
+  return h;
 }
 async function whoopSync(silent){
   if (!auth) return;
@@ -1105,6 +1144,13 @@ function athleteFlags(a){
     if (best[2] <= best[0]) stalled++;
   }
   if (stalled) flags.push({t:stalled+" stalled lift"+(stalled>1?"s":""), lvl:1});
+  if (a.days && a.days.length>=10){
+    const sl = avgOf(a.days,"sleep_hours",7);
+    if (sl!=null && sl<6.5) flags.push({t:"sleep "+sl+"h avg", lvl:1});
+    const hrvNow = avgOf(a.days,"hrv",7), hrvPrev = avgOf(a.days.slice(0,-7),"hrv",7);
+    if (hrvNow!=null && hrvPrev!=null && hrvPrev>0 && (hrvNow-hrvPrev)/hrvPrev <= -0.10)
+      flags.push({t:"HRV falling", lvl:1});
+  }
   return flags;
 }
 function openAthlete(uid){
@@ -1141,17 +1187,19 @@ async function loadCoach(){
     fetch(WHOOP_FN, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"sync", all:true}) }).catch(()=>{});
   }
-  const [pr, lr, gr, nr, wr] = await Promise.all([
+  const [pr, lr, gr, nr, wr, dr] = await Promise.all([
     sb("/rest/v1/profiles?select=user_id,display_name,program_id"),
     sb("/rest/v1/logs?select=user_id,data,updated_at"),
     sb("/rest/v1/programs?select=id,name"),
     sb("/rest/v1/coach_notes?select=athlete,session_id,body,created_at&order=created_at.desc&limit=400"),
     sb("/rest/v1/whoop_recovery?select=user_id,recovery_score,sleep_hours,updated_at"),
+    sb("/rest/v1/whoop_days?select=*&order=day.asc"),
   ]);
   if (!pr.ok || !lr.ok || !gr.ok) throw 0;
   const profs = await pr.json(), logs = await lr.json(), progs = await gr.json();
   const allNotes = nr.ok ? await nr.json() : [];
   const allRec = wr.ok ? await wr.json() : [];
+  const allDays = dr.ok ? await dr.json() : [];
   const logMap = {}; logs.forEach(l=>{ logMap[l.user_id]=l; });
   coachData = { athletes: profs.map(p=>{
       const l = logMap[p.user_id];
@@ -1164,7 +1212,7 @@ async function loadCoach(){
       });
       let lastNote = null;
       for (let i=ss.length-1;i>=0;i--){ if (ss[i].note){ lastNote={t:ss[i].note, d:ss[i].date}; break; } }
-      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss, notes:allNotes.filter(n=>n.athlete===p.user_id), rec:allRec.find(r=>r.user_id===p.user_id)||null };
+      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss, notes:allNotes.filter(n=>n.athlete===p.user_id), rec:allRec.find(r=>r.user_id===p.user_id)||null, days:allDays.filter(d=>d.user_id===p.user_id) };
     }), programs: progs };
 }
 async function assignProgram(uid, pid){
@@ -2348,7 +2396,8 @@ function renderProgress(){
   const prev = recent.length>1?recent[recent.length-2].value:0;
   const delta = prev>0 ? Math.round((cur-prev)/prev*100) : null;
 
-  let h = '<h2 class="sect disp a">Body</h2><div class="panel a">';
+  let h = whoopPanel(whoopDays, "Recovery");
+  h += '<h2 class="sect disp a">Body</h2><div class="panel a">';
   {
     const cur = metrics.length ? metrics[metrics.length-1] : null;
     const d30 = metricDelta(30);
@@ -2531,6 +2580,7 @@ function renderAthleteDetail(){
     h += '<div class="panel a"><p class="statline">Activity session: <b>'+esc(s.activity.name)+'</b>'+(s.activity.mins?' \u00B7 '+s.activity.mins+' min':'')+'</p></div>';
     return h;
   }
+  h += whoopPanel(a.days, "Recovery \u0026 sleep");
   // lift table
   h += '<div class="panel a"><table class="lifttab"><thead><tr><th>Lift</th><th>Sets</th><th></th></tr></thead><tbody>';
   for (const [exId, sets] of Object.entries(s.entries||{})){

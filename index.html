@@ -507,6 +507,10 @@
   .coachrec { margin:6px 0 0; font-size:12.5px; font-weight:700; line-height:1.5; }
   .coachrec.bad { color:var(--danger); }
   .coachrec.warn { color:var(--warn); }
+  .lastnight b { font-weight:900; }
+  .lastnight .gv { color:var(--ok); }
+  .lastnight .wv { color:var(--warn); }
+  .lastnight .bv { color:var(--danger); }
   .ovl { margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
   .wimp { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-top:1px solid var(--border); }
   .wimp:first-of-type { border-top:0; }
@@ -694,7 +698,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.3";
+const APP_VERSION = "11.4";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -1004,28 +1008,39 @@ function overlayChart(days, sessions4){
 function whoopPanel(rows, title, sessions4){
   if (!rows || rows.length<2) return "";
   let h = '<h2 class="sect disp a">'+title+'</h2><div class="panel a">';
+  const lastRow = rows[rows.length-1];
+  const spo2 = lastRow.spo2, stC = lastRow.skin_temp_c;
+  const stF = stC!=null ? Math.round(stC*9/5*10+320)/10 : null;
   h += '<div class="bmetrics" style="margin:0 0 12px">'
-    + '<div class="bm"><span class="v num">'+(avgOf(rows,"recovery_score",7)??"\u2013")+'% '+trendArrow(rows,"recovery_score")+'</span><span class="l">Recovery 7d</span></div>'
-    + '<div class="bm"><span class="v num">'+(avgOf(rows,"hrv",7)??"\u2013")+' '+trendArrow(rows,"hrv")+'</span><span class="l">HRV 7d</span></div>'
-    + '<div class="bm"><span class="v num">'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h '+trendArrow(rows,"sleep_hours")+'</span><span class="l">Sleep 7d</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"recovery_score",7)??"\u2013")+'% '+trendArrow(rows,"recovery_score")+'</span><span class="l">Recovery 7 Day</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"hrv",7)??"\u2013")+' '+trendArrow(rows,"hrv")+'</span><span class="l">HRV 7 Day</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h '+trendArrow(rows,"sleep_hours")+'</span><span class="l">Sleep 7 Day</span></div>'
     + '</div>';
+  if (spo2!=null || stF!=null){
+    h += '<div class="bmetrics" style="margin:0 0 12px">'
+      + '<div class="bm"><span class="v num">'+(spo2!=null?spo2+'%':'\u2013')+'</span><span class="l">SpO\u2082 last night</span></div>'
+      + '<div class="bm"><span class="v num">'+(stF!=null?stF+'\u00B0F':'\u2013')+'</span><span class="l">Skin temp last night</span></div>'
+      + '</div>';
+  }
   h += svgLine(rows.slice(-30).filter(r=>r.recovery_score!=null).map(r=>({label:fmtDate(r.day), value:r.recovery_score})), {min:0, max:100, unit:"%"});
-  h += '<p class="statline">Recovery score, last 30 days \u00B7 0\u2013100% scale</p>';
+
   // sleep + strain detail
   const last = rows[rows.length-1];
+  const tone = (v, good, ok) => v==null ? "" : (v>=good ? "gv" : v>=ok ? "wv" : "bv");
   const bits = [];
-  if (last.sleep_performance!=null) bits.push("sleep performance <b>"+Math.round(last.sleep_performance)+"%</b>");
-  if (last.sleep_efficiency!=null) bits.push("efficiency <b>"+Math.round(last.sleep_efficiency)+"%</b>");
-  if (last.sleep_debt_hours) bits.push("debt <b>"+last.sleep_debt_hours+"h</b>");
-  if (last.disturbances!=null) bits.push("<b>"+last.disturbances+"</b> disturbances");
-  if (last.strain!=null) bits.push("day strain <b>"+last.strain+"</b>");
-  if (bits.length) h += '<p class="statline">Last night: '+bits.join(" \u00B7 ")+'</p>';
+  if (last.sleep_performance!=null)
+    bits.push('sleep performance <b class="'+tone(last.sleep_performance,85,70)+'">'+Math.round(last.sleep_performance)+'%</b>');
+  if (last.sleep_efficiency!=null)
+    bits.push('efficiency <b class="'+tone(last.sleep_efficiency,90,80)+'">'+Math.round(last.sleep_efficiency)+'%</b>');
+  if (last.sleep_debt_hours)
+    bits.push('debt <b class="'+(last.sleep_debt_hours<0.5?"gv":last.sleep_debt_hours<1.5?"wv":"bv")+'">'+last.sleep_debt_hours+'h</b>');
+  if (last.disturbances!=null)
+    bits.push('<b class="'+(last.disturbances<=6?"gv":last.disturbances<=12?"wv":"bv")+'">'+last.disturbances+'</b> disturbances');
+  if (last.strain!=null) bits.push('day strain <b>'+last.strain+'</b>');
+  if (bits.length) h += '<p class="statline lastnight">Last night: '+bits.join(" \u00B7 ")+'</p>';
   const debtAvg = avgOf(rows,"sleep_debt_hours",7);
   if (debtAvg && debtAvg>=0.5) h += '<p class="statline" style="color:var(--warn)">Averaging '+debtAvg+'h of sleep debt \u2014 the most likely cap on recovery right now.</p>';
-  const extras = [];
-  if (last.spo2!=null) extras.push("SpO\u2082 <b>"+last.spo2+"%</b>");
-  if (last.skin_temp_c!=null) extras.push("skin temp <b>"+last.skin_temp_c+"\u00B0C</b>");
-  if (extras.length) h += '<p class="statline">Also: '+extras.join(" \u00B7 ")+' \u2014 informational; deviations from your own baseline can precede illness.</p>';
+
   if (sessions4 && sessions4.length){
     const ov = overlayChart(rows, sessions4);
     if (ov) h += '<div class="ovl"><div class="menusect">Training load vs recovery</div>'+ov+'</div>';

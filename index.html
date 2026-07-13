@@ -499,6 +499,34 @@
     border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text);
     font-weight:800; font-size:14px;
   }
+  .coachmsg { border-color:rgba(var(--accent-rgb),.45); }
+  .coachhn { color:var(--accent-hi); }
+  .notearea { width:100%; min-height:52px; border-radius:12px; border:1px solid var(--border);
+    background:rgba(255,255,255,.04); color:var(--text); padding:10px 12px; font-size:13.5px; font-family:inherit; }
+  .flagrow { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .flag { border-radius:999px; padding:4px 9px; font-size:10.5px; font-weight:900; letter-spacing:.04em; }
+  .flag.l2 { background:rgba(252,165,165,.14); color:var(--danger); border:1px solid rgba(252,165,165,.3); }
+  .flag.l1 { background:rgba(251,191,36,.12); color:var(--warn); border:1px solid rgba(251,191,36,.3); }
+  .pb3 { display:flex; gap:8px; } .pb3 .field { flex:1; }
+  .pbsched { display:flex; flex-direction:column; gap:5px; }
+  .pbday { display:flex; align-items:center; gap:8px; }
+  .pbday span { flex:none; width:34px; color:var(--faint); font-size:11px; font-weight:900; }
+  .pbday input { flex:1; min-height:38px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); text-align:center; font-weight:800; }
+  .pbex { padding:10px 0; border-top:1px solid var(--border); }
+  .pbnums { display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .pbnums input { width:52px; min-height:40px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); text-align:center; font-weight:800; }
+  .pbnums select { flex:1; min-height:40px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); }
+  .pbbw { display:flex; align-items:center; gap:4px; color:var(--dim); font-size:11px; font-weight:800; }
+  .pbbw input { width:17px; height:17px; accent-color:var(--accent); }
+  .fullw { width:100%; }
+  .he-ex { padding:10px 0; border-top:1px solid var(--border); }
+  .he-ex:first-of-type { border-top:0; }
+  .he-name { font-weight:800; font-size:13.5px; margin-bottom:7px; }
+  .he-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .he-i { flex:none; width:18px; color:var(--faint); font-size:11px; font-weight:900; text-align:center; }
+  .he-row input { flex:1; min-width:0; min-height:42px; border-radius:11px; border:1px solid var(--border);
+    background:rgba(255,255,255,.04); color:var(--text); text-align:center; font-size:15px; font-weight:800; }
+  .delbtn.sm { min-width:26px; min-height:26px; font-size:11px; margin-left:6px; }
   .barchk { display:flex; align-items:center; gap:9px; margin:2px 0 12px; color:var(--dim); font-size:13px; font-weight:700; }
   .barchk input { width:20px; height:20px; accent-color:var(--accent); flex:none; }
   .tutb { padding:11px 0; border-top:1px solid var(--border); }
@@ -641,7 +669,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.10";
+const APP_VERSION = "10.0";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -799,10 +827,24 @@ async function pullMergePush(){
   const cloudData = rows.length && rows[0].data ? rows[0].data : {};
   const cloud = Array.isArray(cloudData.sessions) ? cloudData.sessions : [];
   (Array.isArray(cloudData.deloadSkips)?cloudData.deloadSkips:[]).forEach(k=>{ if(!deloadSkips.includes(k)) deloadSkips.push(k); });
-  const ids = new Set(sessions.map(s=>s.id));
+  (Array.isArray(cloudData.deleted)?cloudData.deleted:[]).forEach(id=>{ if(!deletedIds.includes(id)) deletedIds.push(id); });
+  (Array.isArray(cloudData.deletedMetrics)?cloudData.deletedMetrics:[]).forEach(id=>{ if(!deletedMetricIds.includes(id)) deletedMetricIds.push(id); });
+  sessions = sessions.filter(s=>!deletedIds.includes(s.id));
+  const byId = new Map(sessions.map(s=>[s.id,s]));
   let added=0;
-  cloud.forEach(s=>{ if(!ids.has(s.id)){ sessions.push(s); added++; } });
+  cloud.forEach(s=>{
+    if (deletedIds.includes(s.id)) return;
+    const mine = byId.get(s.id);
+    if (!mine){ sessions.push(s); byId.set(s.id,s); added++; }
+    else if ((s.rev||0) > (mine.rev||0)){ Object.assign(mine, s); added++; }
+  });
   sessions.sort((a,b)=>a.id-b.id);
+  // metrics: union by id, tombstone-aware
+  const cm = Array.isArray(cloudData.metrics)?cloudData.metrics:[];
+  metrics = metrics.filter(m=>!deletedMetricIds.includes(m.id));
+  const mids = new Set(metrics.map(m=>m.id));
+  cm.forEach(m=>{ if(!deletedMetricIds.includes(m.id) && !mids.has(m.id)){ metrics.push(m); added++; } });
+  metrics.sort((a,b)=>a.id-b.id);
   const migrated = migrateIds();
   if (added || migrated) persist();
   if (sessions.length !== cloud.length || added || migrated) await pushLog();
@@ -813,7 +855,7 @@ async function pushLog(){
   try {
     const r = await sb("/rest/v1/logs", { method:"POST",
       headers:{ "Prefer":"resolution=merge-duplicates" },
-      body:[{ user_id:auth.uid, data:{sessions, deloadSkips}, updated_at:new Date().toISOString() }] });
+      body:[{ user_id:auth.uid, data:{sessions, deloadSkips, metrics, deleted:deletedIds.slice(-300), deletedMetrics:deletedMetricIds.slice(-300)}, updated_at:new Date().toISOString() }] });
     if (!r.ok) throw 0;
     netState="live";
   } catch(e){
@@ -829,7 +871,194 @@ function updateNetBadge(){
 
 // ---------- coach ----------
 let coachData = null;
+let myCoachNotes = [];      // notes addressed to me (athlete)
+let coachNoteDrafts = {};   // coach: sessionId -> draft text
+async function loadMyCoachNotes(){
+  if (!auth) return;
+  try {
+    const r = await sb("/rest/v1/coach_notes?select=id,session_id,body,created_at&athlete=eq."+auth.uid+"&order=created_at.desc&limit=50");
+    if (r.ok) myCoachNotes = await r.json();
+  } catch(e){}
+}
+function unseenCoachNote(){
+  if (!myCoachNotes.length) return null;
+  const seen = Number(localStorage.getItem("iron-log-notes-seen")||0);
+  const n = myCoachNotes[0];
+  return new Date(n.created_at).getTime() > seen ? n : null;
+}
+function markNotesSeen(){
+  try { localStorage.setItem("iron-log-notes-seen", String(Date.now())); } catch(e){}
+  render();
+}
+function coachNoteFor(sessId){
+  return myCoachNotes.find(n=>n.session_id===sessId) || null;
+}
+async function saveCoachNote(athleteUid, sessId){
+  const body = (coachNoteDrafts[sessId]||"").trim();
+  if (!body){ toast("Write the note first."); return; }
+  try {
+    const r = await sb("/rest/v1/coach_notes", { method:"POST",
+      headers:{ "Prefer":"resolution=merge-duplicates" },
+      body:[{ athlete:athleteUid, session_id:sessId, coach:auth.uid, body }] });
+    if (!r.ok) throw 0;
+    toast("Note sent \u2014 they\u2019ll see it on next open.");
+    coachNoteDrafts[sessId]="";
+    if (coachData){ const a=coachData.athletes.find(x=>x.uid===athleteUid); if (a){ a.notes=a.notes||[]; const ex=a.notes.find(n=>n.session_id===sessId); if(ex) ex.body=body; else a.notes.unshift({session_id:sessId, body, created_at:new Date().toISOString()}); } }
+    render();
+  } catch(e){ toast("Couldn\u2019t send \u2014 run the coach_notes migration?"); }
+}
 let coachView = null; // {uid, sessId}
+// ---------- program builder ----------
+let progEdit = null; // {id|null, name, path, data}
+const CAT_OPTS = ["","quads","hams","glutes","chest_press","incline_press","chest_fly","row","vert_pull","sh_press","side_delt","rear_delt","biceps","triceps","calves","abs"];
+async function openProgEdit(id){
+  if (!id){
+    progEdit = { id:null, name:"", path:"", data:{ inc:5, weekTarget:3, deloadEvery:0, schedule:{"0":null,"1":"A","2":null,"3":"B","4":null,"5":"C","6":null},
+      workouts:{ A:{label:"Workout A",tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]},
+                 B:{label:"Workout B",tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]},
+                 C:{label:"Workout C",tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]} } } };
+    render(); return;
+  }
+  try {
+    const r = await sb("/rest/v1/programs?select=id,name,path,data&id=eq."+id);
+    if (!r.ok) throw 0;
+    const rows = await r.json();
+    if (!rows.length) throw 0;
+    progEdit = JSON.parse(JSON.stringify(rows[0]));
+    render();
+  } catch(e){ toast("Couldn\u2019t load program."); }
+}
+function pbField(f,v){ if (f==="name") progEdit.name=v; else progEdit.data[f]=Number(v)||0; }
+function pbSched(d,v){ progEdit.data.schedule[d] = v==="" ? null : (v.includes(",") ? v.split(",").map(s=>s.trim()).filter(Boolean) : v); }
+function pbW(k,f,v){ progEdit.data.workouts[k][f]=v; }
+function pbEx(k,i,f,v){
+  const e = progEdit.data.workouts[k].exercises[i];
+  if (f==="bw") e.bw = !!v;
+  else if (["min","max","sets","rest"].includes(f)) e[f]=Number(v)||0;
+  else e[f]=v;
+}
+function pbAddEx(k){ progEdit.data.workouts[k].exercises.push({name:"",min:8,max:12,sets:3}); render(); }
+function pbDelEx(k,i){ progEdit.data.workouts[k].exercises.splice(i,1); render(); }
+function pbAddW(){
+  const used = Object.keys(progEdit.data.workouts);
+  const k = "ABCDEFG".split("").find(c=>!used.includes(c)) || "W"+(used.length+1);
+  progEdit.data.workouts[k]={label:"Workout "+k,tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]};
+  render();
+}
+function pbDelW(k){
+  if (Object.keys(progEdit.data.workouts).length<=1){ toast("A program needs at least one workout."); return; }
+  delete progEdit.data.workouts[k];
+  for (const d of Object.keys(progEdit.data.schedule)){
+    const v = progEdit.data.schedule[d];
+    if (v===k) progEdit.data.schedule[d]=null;
+    else if (Array.isArray(v)) progEdit.data.schedule[d]=v.filter(x=>x!==k).length?v.filter(x=>x!==k):null;
+  }
+  render();
+}
+function pbValidate(){
+  if (!progEdit.name.trim()) return "Name the program.";
+  const wks = Object.entries(progEdit.data.workouts);
+  if (!wks.length) return "Add a workout.";
+  for (const [k,w] of wks){
+    const exs = (w.exercises||[]).filter(e=>e.name && e.name.trim());
+    if (!exs.length) return w.label+" has no named exercises.";
+    for (const e of exs){
+      if (!(e.sets>=1)) return e.name+": sets must be 1+.";
+      if (!(e.min>=1) || !(e.max>=e.min)) return e.name+": rep range needs min \u2264 max.";
+    }
+    w.exercises = exs.map(e=>{ const o={name:e.name.trim(),min:e.min,max:e.max,sets:e.sets}; if(e.cat)o.cat=e.cat; if(e.bw)o.bw=true; if(e.note&&e.note.trim())o.note=e.note.trim(); if(e.rest)o.rest=e.rest; return o; });
+  }
+  return null;
+}
+async function saveProgEdit(){
+  const err = pbValidate();
+  if (err){ toast(err); return; }
+  try {
+    if (progEdit.id){
+      const r = await sb("/rest/v1/programs?id=eq."+progEdit.id, { method:"PATCH", body:{ name:progEdit.name.trim(), data:progEdit.data } });
+      if (!r.ok) throw 0;
+    } else {
+      const path = slug(progEdit.name.trim())+"-"+String(Date.now()).slice(-4);
+      const r = await sb("/rest/v1/programs", { method:"POST", body:[{ name:progEdit.name.trim(), path, data:progEdit.data }] });
+      if (!r.ok) throw 0;
+    }
+    toast("Program saved.");
+    progEdit = null;
+    if (profile && profile.is_coach) await loadCoach();
+    await loadProgram();
+    render();
+  } catch(e){ toast("Save failed \u2014 check you\u2019re signed in as coach."); }
+}
+function renderProgEdit(){
+  const P = progEdit;
+  let h = '<button class="silink" onclick="progEdit=null;render()">\u2190 Cancel</button>';
+  h += '<h2 class="sect disp a">'+(P.id?'Edit program':'New program')+'</h2>';
+  h += '<div class="panel a">';
+  h += '<div class="field"><label>Program name</label><input class="fullinput" value="'+esc(P.name)+'" placeholder="e.g. Female \u2014 Lean Muscle" onchange="pbField(\'name\',this.value)"></div>';
+  h += '<div class="pb3">'
+    +'<div class="field"><label>Weight inc</label><input class="fullinput num" inputmode="decimal" value="'+(P.data.inc||5)+'" onchange="pbField(\'inc\',this.value)"></div>'
+    +'<div class="field"><label>Sessions/wk</label><input class="fullinput num" inputmode="numeric" value="'+(P.data.weekTarget||3)+'" onchange="pbField(\'weekTarget\',this.value)"></div>'
+    +'<div class="field"><label>Deload every (wks, 0=off)</label><input class="fullinput num" inputmode="numeric" value="'+(P.data.deloadEvery||0)+'" onchange="pbField(\'deloadEvery\',this.value)"></div>'
+    +'</div>';
+  h += '<div class="field"><label>Schedule (blank = rest \u00B7 \u201CA,B\u201D alternates)</label><div class="pbsched">';
+  const DN=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  for (let d=0;d<7;d++){
+    const v = P.data.schedule[String(d)];
+    const txt = v==null?"":(Array.isArray(v)?v.join(","):v);
+    h += '<div class="pbday"><span>'+DN[d]+'</span><input value="'+esc(txt)+'" onchange="pbSched(\''+d+'\',this.value)"></div>';
+  }
+  h += '</div></div></div>';
+  for (const [k,w] of Object.entries(P.data.workouts)){
+    h += '<div class="panel a"><div class="volhead"><span class="vh disp">'+k+'</span><button class="delbtn" onclick="pbDelW(\''+k+'\')">\u2715</button></div>';
+    h += '<div class="namerow"><input value="'+esc(w.label||"")+'" placeholder="Label" onchange="pbW(\''+k+'\',\'label\',this.value)">'
+      +'<input value="'+esc(w.tag||"")+'" placeholder="Tag" onchange="pbW(\''+k+'\',\'tag\',this.value)"></div>';
+    (w.exercises||[]).forEach((e,i)=>{
+      h += '<div class="pbex">'
+        +'<div class="namerow"><input value="'+esc(e.name||"")+'" placeholder="Exercise name" onchange="pbEx(\''+k+'\','+i+',\'name\',this.value)">'
+        +'<button class="delbtn" onclick="pbDelEx(\''+k+'\','+i+')">\u2715</button></div>'
+        +'<div class="pbnums num">'
+        +'<input inputmode="numeric" value="'+(e.sets||"")+'" placeholder="sets" onchange="pbEx(\''+k+'\','+i+',\'sets\',this.value)">'
+        +'<input inputmode="numeric" value="'+(e.min||"")+'" placeholder="min" onchange="pbEx(\''+k+'\','+i+',\'min\',this.value)">'
+        +'<input inputmode="numeric" value="'+(e.max||"")+'" placeholder="max" onchange="pbEx(\''+k+'\','+i+',\'max\',this.value)">'
+        +'<select onchange="pbEx(\''+k+'\','+i+',\'cat\',this.value)">';
+      CAT_OPTS.forEach(c=>{ h += '<option value="'+c+'"'+(e.cat===c?' selected':'')+'>'+(c||"no swap")+'</option>'; });
+      h += '</select>'
+        +'<label class="pbbw"><input type="checkbox" '+(e.bw?'checked':'')+' onchange="pbEx(\''+k+'\','+i+',\'bw\',this.checked)"> bw</label>'
+        +'</div>'
+        +'<input class="fullinput" style="margin-top:6px" value="'+esc(e.note||"")+'" placeholder="Note (optional)" onchange="pbEx(\''+k+'\','+i+',\'note\',this.value)">'
+        +'</div>';
+    });
+    h += '<button class="silink" onclick="pbAddEx(\''+k+'\')">+ Add exercise</button></div>';
+  }
+  h += '<button class="abtn fullw" onclick="pbAddW()">+ Add workout</button>';
+  h += '<button class="sibtn fullw" style="margin-top:10px" onclick="saveProgEdit()">Save program</button>';
+  return h;
+}
+function athleteFlags(a){
+  const flags = [];
+  if (a.last){
+    const days = Math.floor((Date.now()-new Date(a.last).getTime())/86400000);
+    if (days>=7) flags.push({t:"inactive "+days+"d", lvl:2});
+  } else flags.push({t:"no sessions", lvl:2});
+  // stalled lifts: last 3 entries per lift, same top weight, no rep gain (non-deload, lift sessions)
+  const hist = {};
+  a.sessions.filter(s=>!s.deload && !s.activity).forEach(s=>{
+    for (const [id,sets] of Object.entries(s.entries||{})){
+      (hist[id]=hist[id]||[]).push(sets);
+      if (hist[id].length>3) hist[id].shift();
+    }
+  });
+  let stalled=0;
+  for (const sets3 of Object.values(hist)){
+    if (sets3.length<3) continue;
+    const tops = sets3.map(x=>Math.max(...x.map(s=>s.w||0)));
+    if (!(tops[0]===tops[1] && tops[1]===tops[2] && tops[0]>0)) continue;
+    const best = sets3.map(x=>Math.max(...x.map(s=>s.r||0)));
+    if (best[2] <= best[0]) stalled++;
+  }
+  if (stalled) flags.push({t:stalled+" stalled lift"+(stalled>1?"s":""), lvl:1});
+  return flags;
+}
 function openAthlete(uid){
   const a = coachData && coachData.athletes.find(x=>x.uid===uid);
   if (!a || !a.sessions.length){ toast("No sessions logged yet."); return; }
@@ -858,13 +1087,15 @@ function trendMark(cur, prev){
   return '<span class="tr flat">\u2013</span>';
 }
 async function loadCoach(){
-  const [pr, lr, gr] = await Promise.all([
+  const [pr, lr, gr, nr] = await Promise.all([
     sb("/rest/v1/profiles?select=user_id,display_name,program_id"),
     sb("/rest/v1/logs?select=user_id,data,updated_at"),
     sb("/rest/v1/programs?select=id,name"),
+    sb("/rest/v1/coach_notes?select=athlete,session_id,body,created_at&order=created_at.desc&limit=400"),
   ]);
   if (!pr.ok || !lr.ok || !gr.ok) throw 0;
   const profs = await pr.json(), logs = await lr.json(), progs = await gr.json();
+  const allNotes = nr.ok ? await nr.json() : [];
   const logMap = {}; logs.forEach(l=>{ logMap[l.user_id]=l; });
   coachData = { athletes: profs.map(p=>{
       const l = logMap[p.user_id];
@@ -877,7 +1108,7 @@ async function loadCoach(){
       });
       let lastNote = null;
       for (let i=ss.length-1;i>=0;i--){ if (ss[i].note){ lastNote={t:ss[i].note, d:ss[i].date}; break; } }
-      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss };
+      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss, notes:allNotes.filter(n=>n.athlete===p.user_id) };
     }), programs: progs };
 }
 async function assignProgram(uid, pid){
@@ -910,6 +1141,7 @@ async function afterAuth(){
     await loadProgram();
     const added = await pullMergePush();
     if (tagLegacySessions()) pushLog();
+    await loadMyCoachNotes();
     netState="live"; updateNetBadge();
     if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
     if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
@@ -1004,7 +1236,10 @@ function renderTut(){
   h += T("Swap a lift", "Tap a lift\u2019s name to pick an alternative for that body part. The sub inherits today\u2019s sets and reps, builds its own history, and the prescribed lift returns next session.");
   h += T("Rest timer", "Starts automatically when you enter reps. Tap the chip to skip.");
   h += T("Notes", "\u270E on a lift for lift notes (\u201Cknee tweaked set 2\u201D); the box above Save for session notes. Your coach sees both.");
-  h += T("Plate calculator", "The barbell icon on each lift opens the calculator preloaded with your entered weight. Uncheck the bar for plate-loaded machines \u2014 it switches from per-side to total plates.");
+  h += T("Plate calculator", "The barbell icon on each lift opens the calculator preloaded with your entered weight, a warm-up ramp to your work sets, and the exact plates drawn to scale. Uncheck the bar for plate-loaded machines \u2014 it switches to total plates.");
+  h += T("Body & activity", "Log bodyweight (and waist) in Progress \u2014 the 30-day trend next to your training volume is the real scoreboard. Yoga, cardio, and walks log via <b>+ Log an activity</b> and count toward your weekly target.");
+  h += T("Fixing mistakes", "Tap \u270E on any session in Progress \u2192 Activity to correct weights and reps, or delete it entirely. Fat-fingered a 900 lb leg press? Gone, and your PRs recalculate.");
+  h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
   h += T("Deload weeks", "Every 7th training week the app cuts loads to ~50% automatically. Take it \u2014 that\u2019s when growth consolidates. Or hit Skip and the counter resets.");
   h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Saved sessions sync to your account, so your history follows you to any device.");
   h += T("Progress tab", "30-day summary vs the previous 30, weekly consistency, muscle-group balance, recent PRs. Tap any lift for its full story: top-set chart, estimated 1RM trend, PR history, every session ever.");
@@ -1068,8 +1303,31 @@ function renderPlates(){
       }
     }
   } else h += '<p class="statline">Enter a target \u2014 or open this from a lift\u2019s barbell icon to load its weight automatically.</p>';
+  if (t>0){
+    const ramp = warmupRamp(t, plateInclBar);
+    if (ramp.length){
+      h += '<div class="menusect" style="margin-top:14px">Warm-up ramp</div><div class="trendrows">';
+      ramp.forEach(w=>{ h += '<div class="trow"><span class="d">'+w.label+'</span><span class="s num">'+w.w+' lb \u00D7 '+w.r+'</span></div>'; });
+      h += '<div class="trow"><span class="d">Work sets</span><span class="s num">'+t+' lb</span></div></div>';
+    }
+  }
   h += '</div>';
   return h;
+}
+function warmupRamp(t, inclBar){
+  const r5 = x=>Math.max(inclBar?BAR_W:0, Math.round(x/5)*5);
+  if (inclBar){
+    if (t < BAR_W*1.6) return [];
+    const steps = [[BAR_W,10],[r5(t*.55),8],[r5(t*.7),5],[r5(t*.85),3]];
+    const out=[]; const seen=new Set();
+    steps.forEach(([w,r],i)=>{ if (w<t && !seen.has(w)){ seen.add(w); out.push({label:i===0?"Empty bar":"Ramp "+i, w, r}); } });
+    return out;
+  }
+  if (t < 90) return [];
+  const steps = [[r5(t*.5),10],[r5(t*.7),6],[r5(t*.85),3]];
+  const out=[]; const seen=new Set();
+  steps.forEach(([w,r],i)=>{ if (w>0 && w<t && !seen.has(w)){ seen.add(w); out.push({label:"Ramp "+(i+1), w, r}); } });
+  return out;
 }
 function toggleMenu(){ menuOpen = !menuOpen; render(); }
 function renderMenu(){
@@ -1128,7 +1386,10 @@ function migrateIds(){
 }
 let sessions = [];
 let deloadSkips = [];
-try { const raw = localStorage.getItem(KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p.sessions)) sessions = p.sessions; if (Array.isArray(p.deloadSkips)) deloadSkips = p.deloadSkips; } } catch(e){}
+let metrics = [];        // [{id, date, w, waist?, note?}]
+let deletedIds = [];     // session tombstones
+let deletedMetricIds = [];
+try { const raw = localStorage.getItem(KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p.sessions)) sessions = p.sessions; if (Array.isArray(p.deloadSkips)) deloadSkips = p.deloadSkips; if (Array.isArray(p.metrics)) metrics = p.metrics; if (Array.isArray(p.deleted)) deletedIds = p.deleted; if (Array.isArray(p.deletedMetrics)) deletedMetricIds = p.deletedMetrics; } } catch(e){}
 if (migrateIds()) { try { localStorage.setItem(KEY, JSON.stringify({sessions, deloadSkips})); } catch(e){} }
 let tab = "train";
 let values = {};
@@ -1137,6 +1398,54 @@ let adjustOpen = null;
 let subs = {};       // slotKey -> substitute lift name (per session)
 let pickerFor = null; // prescribed exercise id whose picker is open
 let progLift = null;  // lift detail open in Progress
+let histEdit = null;  // session id being edited
+let histDraft = null; // working copy of entries
+function openHistEdit(id){
+  const s = sessions.find(x=>x.id===id);
+  if (!s) return;
+  histEdit = id;
+  histDraft = JSON.parse(JSON.stringify(s.entries||{}));
+  render();
+}
+function histTyped(exId,i,f,v){
+  if (histDraft && histDraft[exId] && histDraft[exId][i]) histDraft[exId][i][f] = v===""?"":Number(v);
+}
+function saveHistEdit(){
+  const s = sessions.find(x=>x.id===histEdit);
+  if (!s){ histEdit=null; render(); return; }
+  const cleaned = {};
+  for (const [id,sets] of Object.entries(histDraft)){
+    const keep = sets.filter(x=>Number(x.r)>0).map(x=>({w:Number(x.w)||0, r:Number(x.r)}));
+    if (keep.length) cleaned[id] = keep;
+  }
+  if (!Object.keys(cleaned).length){ toast("Every set is empty \u2014 use Delete instead."); return; }
+  s.entries = cleaned;
+  s.rev = (s.rev||0)+1;
+  histEdit = null; histDraft = null;
+  persist(); pushLog(); toast("Session updated.");
+  render();
+}
+function renderHistEdit(){
+  const s = sessions.find(x=>x.id===histEdit);
+  if (!s) return "";
+  let h = '<div class="sheetback" onclick="histEdit=null;render()"></div>';
+  h += '<div class="sheet" role="dialog" aria-label="edit session">';
+  h += '<div class="sheethead"><span class="sheettitle disp">Edit session</span><span class="sheetsub">'+fmtDate(s.date)+' \u00B7 '+esc(WORKOUTS[s.workout]?WORKOUTS[s.workout].label:s.workout)+'</span></div>';
+  for (const [exId,sets] of Object.entries(histDraft)){
+    h += '<div class="he-ex"><div class="he-name">'+esc(exDisplayName(exId))+'</div>';
+    sets.forEach((x,i)=>{
+      h += '<div class="he-row num"><span class="he-i">'+(i+1)+'</span>'
+        +'<input inputmode="decimal" value="'+(x.w===0?'0':(x.w||''))+'" placeholder="wt" onchange="histTyped(\''+exId+'\','+i+',\'w\',this.value)">'
+        +'<input inputmode="numeric" value="'+(x.r||'')+'" placeholder="reps" onchange="histTyped(\''+exId+'\','+i+',\'r\',this.value)">'
+        +'</div>';
+    });
+    h += '</div>';
+  }
+  h += '<p class="statline">Clear a set\u2019s reps to remove it. Weight 0 = bodyweight.</p>';
+  h += '<div class="btngrid"><button class="abtn" onclick="deleteSession('+s.id+')">Delete session</button><button class="sibtn" onclick="saveHistEdit()">Save changes</button></div>';
+  h += '</div>';
+  return h;
+}
 const DRAFT_KEY = "iron-log-draft";
 const DRAFT_TTL = 12*3600*1000;
 function saveDraft(){
@@ -1158,7 +1467,7 @@ function effEx(wid){
   });
 }
 let lastTabRendered = null;
-function persist(){ try { localStorage.setItem(KEY, JSON.stringify({sessions, deloadSkips})); } catch(e){ toast("Storage failed \u2014 device may be full."); } }
+function persist(){ try { localStorage.setItem(KEY, JSON.stringify({sessions, deloadSkips, metrics, deleted:deletedIds.slice(-300), deletedMetrics:deletedMetricIds.slice(-300)})); } catch(e){ toast("Storage failed \u2014 device may be full."); } }
 
 // ================= Schedule =================
 function altPick(list, dow){
@@ -1210,7 +1519,7 @@ function historyFor(exId, n){
 function round5(x){ return Math.max(5, Math.round(x/5)*5); }
 function deloadActive(){
   if (!DELOAD_EVERY) return false;
-  const wks = [...new Set(sessions.map(s=>weekKey(s.date)))].sort();
+  const wks = [...new Set(sessions.filter(s=>!s.activity).map(s=>weekKey(s.date)))].sort();
   const resets = sessions.filter(s=>s.deload).map(s=>weekKey(s.date)).concat(deloadSkips).sort();
   const lastReset = resets.length ? resets[resets.length-1] : null;
   const cur = weekKey(new Date().toISOString());
@@ -1250,6 +1559,54 @@ function isStalled(exId){
   if (!(tops[0]===tops[1] && tops[1]===tops[2])) return false;
   const best = h.map(x=>Math.max(...x.sets.map(s=>s.r)));
   return best[0] <= best[2];
+}
+// ================= Body metrics =================
+let bwDraft = {w:"", waist:""};
+let actOpen = false, actDraft = {name:"", mins:""};
+function toggleActivity(){ actOpen = !actOpen; render(); }
+function logActivity(){
+  const name = (actDraft.name||"").trim(), mins = Number(actDraft.mins)||0;
+  if (!name){ toast("Name the activity."); return; }
+  sessions.push({id:Date.now(), date:new Date().toISOString(), workout:"ACT", activity:{name, mins}, entries:{}, prog:curProg()});
+  actDraft = {name:"", mins:""}; actOpen = false;
+  persist(); pushLog(); updateWeekBadge();
+  toast("Activity logged.");
+  render();
+}
+function renderActivity(){
+  let h = '<div class="sheetback" onclick="toggleActivity()"></div>';
+  h += '<div class="sheet" role="dialog" aria-label="log activity">';
+  h += '<div class="sheethead"><span class="sheettitle disp">Log activity</span><span class="sheetsub">Yoga, cardio, hike \u2014 counts toward your week</span></div>';
+  h += '<div class="chips" style="margin-bottom:10px">';
+  ["Hot Yoga","Cardio","Walk","Swim","Bike"].forEach(n=>{ h += '<button class="chip" onclick="actDraft.name=\''+n+'\';render()">'+n+'</button>'; });
+  h += '</div>';
+  h += '<div class="namerow"><input placeholder="Activity" value="'+esc(actDraft.name)+'" onchange="actDraft.name=this.value">'
+    +'<input inputmode="numeric" placeholder="Minutes" value="'+esc(actDraft.mins)+'" onchange="actDraft.mins=this.value">'
+    +'<button class="sibtn" onclick="logActivity()">Log</button></div>';
+  h += '</div>';
+  return h;
+}
+function logMetric(){
+  const w = Number(bwDraft.w), waist = Number(bwDraft.waist)||null;
+  if (!w || w<=0){ toast("Enter a bodyweight."); return; }
+  metrics.push({id:Date.now(), date:new Date().toISOString(), w, waist});
+  bwDraft = {w:"", waist:""};
+  persist(); pushLog(); toast("Logged.");
+  render();
+}
+function deleteMetric(id){
+  metrics = metrics.filter(m=>m.id!==id);
+  if (!deletedMetricIds.includes(id)) deletedMetricIds.push(id);
+  persist(); pushLog(); render();
+}
+function metricDelta(days){
+  if (metrics.length<2) return null;
+  const cutoff = Date.now()-days*86400000;
+  const past = metrics.filter(m=>new Date(m.date).getTime()<=cutoff);
+  const base = past.length ? past[past.length-1] : metrics[0];
+  const cur = metrics[metrics.length-1];
+  if (base.id===cur.id) return null;
+  return +(cur.w - base.w).toFixed(1);
 }
 // ================= Analytics =================
 function e1rm(w,r){ return r>0 && w>0 ? Math.round(w*(1+r/30)) : 0; }
@@ -1381,7 +1738,8 @@ function render(){
   lastTabRendered = tab;
   m.innerHTML = ((!auth && !localOnly) ? renderWelcome()
     : tab==="train" ? renderTrain() : tab==="coach" ? renderCoach() : renderProgress())
-    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "");
+    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "")
+    + (histEdit ? renderHistEdit() : "") + (actOpen ? renderActivity() : "");
   if (tab==="progress") setTimeout(animateArea, 30);
 }
 
@@ -1493,6 +1851,15 @@ function renderTrain(){
   }
 
   // ===== Schedule strip =====
+  h += '<button class="silink" onclick="toggleActivity()">+ Log an activity instead (yoga, cardio\u2026)</button>';
+  {
+    const un = unseenCoachNote();
+    if (un){
+      h += '<div class="panel a coachmsg"><div class="menusect">Coach feedback</div>'
+        +'<p class="tutp" style="color:var(--text)">'+esc(un.body)+'</p>'
+        +'<p class="statline">'+fmtDate(un.created_at)+' \u00B7 <button class="silink" onclick="markNotesSeen()">Got it</button></p></div>';
+    }
+  }
   h += '<h2 class="sect disp a">Week</h2><div class="sched a">';
   const days = [["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
   for (const [nm,dow] of days){
@@ -1763,7 +2130,10 @@ function saveSession(){
   pushLog();
 }
 function deleteSession(id){
+  if (!confirm("Delete this session? Its sets leave your history and analytics.")) return;
   sessions = sessions.filter(s=>s.id!==id);
+  if (!deletedIds.includes(id)) deletedIds.push(id);
+  histEdit = null;
   persist(); toast("Session deleted."); render();
   pushLog();
 }
@@ -1902,8 +2272,27 @@ function renderProgress(){
   const prev = recent.length>1?recent[recent.length-2].value:0;
   const delta = prev>0 ? Math.round((cur-prev)/prev*100) : null;
 
+  let h = '<h2 class="sect disp a">Body</h2><div class="panel a">';
+  {
+    const cur = metrics.length ? metrics[metrics.length-1] : null;
+    const d30 = metricDelta(30);
+    h += '<div class="volhead"><span class="vh disp num">'+(cur? cur.w+' lb' : '\u2013')+'</span>'
+      +(d30!==null?'<span class="delta num '+(d30<=0?"up":"down")+'">'+(d30>0?'+':'')+d30+' lb / 30d</span>':'')+'</div>';
+    if (metrics.length>1) h += svgLine(metrics.slice(-16).map(m=>({label:fmtDate(m.date), value:m.w})));
+    h += '<div class="namerow" style="margin-top:10px"><input inputmode="decimal" placeholder="Weight" value="'+esc(bwDraft.w)+'" onchange="bwDraft.w=this.value">'
+      +'<input inputmode="decimal" placeholder="Waist (optional)" value="'+esc(bwDraft.waist)+'" onchange="bwDraft.waist=this.value">'
+      +'<button class="sibtn" onclick="logMetric()">Log</button></div>';
+    if (metrics.length){
+      h += '<div class="trendrows" style="margin-top:10px">';
+      [...metrics].reverse().slice(0,5).forEach(m=>{
+        h += '<div class="trow"><span class="d">'+fmtDate(m.date)+'</span><span class="s num">'+m.w+' lb'+(m.waist?' \u00B7 waist '+m.waist+'\u2033':'')+' <button class="delbtn sm" onclick="deleteMetric('+m.id+')">\u2715</button></span></div>';
+      });
+      h += '</div>';
+    } else h += '<p class="statline">Log bodyweight after your morning weigh-in \u2014 the trend beside your volume tells the whole story.</p>';
+  }
+  h += '</div>';
   const S = summaryStats(30);
-  let h = '<h2 class="sect disp a">Last 30 days</h2>';
+  h += '<h2 class="sect disp a">Last 30 days</h2>';
   h += '<div class="panel a"><div class="bmetrics" style="margin:0 0 10px">'
     + statCell("Workouts", S.cur.workouts, pctDelta(S.cur.workouts,S.prev.workouts))
     + statCell("Sets", S.cur.sets, pctDelta(S.cur.sets,S.prev.sets))
@@ -1980,13 +2369,17 @@ function renderProgress(){
   h += '<h2 class="sect disp a">Activity</h2><div class="hist">';
   if (!sessions.length) h += '<p class="empty">Empty log. Go lift.</p>';
   [...sessions].reverse().slice(0,12).forEach((s,i)=>{
+    const isAct = !!s.activity;
     let vol=0; Object.values(s.entries||{}).forEach(sets=>sets.forEach(x=>{vol+=x.w*x.r;}));
     h += '<div class="hitem a" style="animation-delay:'+(Math.min(i,8)*20)+'ms"><div>'
-      +'<div class="htitle">'+(WORKOUTS[s.workout]?WORKOUTS[s.workout].label:esc(s.workout))+'</div>'
-      +'<div class="hmeta num">'+fmtDate(s.date)+(s.deload?' \u00B7 deload':'')+' \u00B7 '+Object.keys(s.entries).length+' lifts \u00B7 '+(vol>=1000?(vol/1000).toFixed(1)+"k":Math.round(vol))+' lb</div>'
+      +'<div class="htitle">'+(isAct? esc(s.activity.name) : (WORKOUTS[s.workout]?WORKOUTS[s.workout].label:esc(s.workout)))+'</div>'
+      +'<div class="hmeta num">'+fmtDate(s.date)+(s.deload?' \u00B7 deload':'')
+      +(isAct? (s.activity.mins?' \u00B7 '+s.activity.mins+' min':'') : ' \u00B7 '+Object.keys(s.entries).length+' lifts \u00B7 '+(vol>=1000?(vol/1000).toFixed(1)+"k":Math.round(vol))+' lb')+'</div>'
       +(s.note?'<div class="hnote">\u270E '+esc(s.note)+'</div>':'')
+      +((cn=>cn?'<div class="hnote coachhn">Coach: '+esc(cn.body)+'</div>':'')(coachNoteFor(s.id)))
       +'</div>'
-      +'<button class="delbtn" onclick="deleteSession('+s.id+')" aria-label="delete session">\u2715</button></div>';
+      +(isAct?'<button class="delbtn" onclick="deleteSession('+s.id+')" aria-label="delete activity">\u2715</button>'
+             :'<button class="delbtn" onclick="openHistEdit('+s.id+')" aria-label="edit session">\u270E</button>')+'</div>';
   });
   h += '</div>';
 
@@ -2044,12 +2437,24 @@ function renderAthleteDetail(){
   for (let i=ss.length-1;i>=0;i--){
     const x=ss[i]; let vol=0;
     Object.values(x.entries||{}).forEach(sets=>sets.forEach(e=>{vol+=(e.w||0)*e.r;}));
-    h += '<option value="'+x.id+'"'+(i===idx?' selected':'')+'>'+fmtDate(x.date)+' \u00B7 '+esc(x.workout)+(x.deload?' \u00B7 deload':'')+' \u00B7 '+(vol>=1000?(vol/1000).toFixed(1)+'k':Math.round(vol))+' lb</option>';
+    h += '<option value="'+x.id+'"'+(i===idx?' selected':'')+'>'+fmtDate(x.date)+' \u00B7 '+(x.activity?esc(x.activity.name):esc(x.workout))+(x.deload?' \u00B7 deload':'')+' \u00B7 '+(x.activity?(x.activity.mins||0)+' min':(vol>=1000?(vol/1000).toFixed(1)+'k':Math.round(vol))+' lb')+'</option>';
   }
   h += '</select></div>';
   if (s.deload) h += '<p class="statline">Deload session \u2014 planned half loads; dips here are by design.</p>';
   if (s.note) h += '<p class="hnote">\u270E '+esc(s.note)+'</p>';
+  {
+    const ex = (a.notes||[]).find(n=>n.session_id===s.id);
+    const draft = coachNoteDrafts[s.id]!==undefined ? coachNoteDrafts[s.id] : (ex?ex.body:"");
+    h += '<div class="menusect" style="margin-top:12px">Feedback to '+esc(a.name.split(" ")[0])+'</div>';
+    h += '<textarea class="notearea" rows="2" placeholder="e.g. Drop leg press 10% \u2014 pain-free depth only" onchange="coachNoteDrafts['+s.id+']=this.value">'+esc(draft)+'</textarea>';
+    h += '<button class="sibtn fullw" style="margin-top:8px" onclick="saveCoachNote(\''+a.uid+'\','+s.id+')">'+(ex?'Update note':'Send note')+'</button>';
+    if (ex) h += '<p class="statline">Sent '+fmtDate(ex.created_at)+'</p>';
+  }
   h += '</div>';
+  if (s.activity){
+    h += '<div class="panel a"><p class="statline">Activity session: <b>'+esc(s.activity.name)+'</b>'+(s.activity.mins?' \u00B7 '+s.activity.mins+' min':'')+'</p></div>';
+    return h;
+  }
   // lift table
   h += '<div class="panel a"><table class="lifttab"><thead><tr><th>Lift</th><th>Sets</th><th></th></tr></thead><tbody>';
   for (const [exId, sets] of Object.entries(s.entries||{})){
@@ -2065,10 +2470,13 @@ function renderAthleteDetail(){
 }
 function renderCoach(){
   if (!coachData) return '<div class="panel a"><p class="empty">Loading roster\u2026</p></div>';
+  if (progEdit) return renderProgEdit();
   if (coachView) return renderAthleteDetail();
   let h = '<h2 class="sect disp a">Roster \u2014 '+coachData.athletes.length+' athlete'+(coachData.athletes.length===1?'':'s')+'</h2>';
-  coachData.athletes.forEach((a,i)=>{
+  [...coachData.athletes].sort((x,y)=>athleteFlags(y).length-athleteFlags(x).length).forEach((a,i)=>{
+    const flags = athleteFlags(a);
     h += '<div class="panel a coachcard" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="openAthlete(\''+a.uid+'\')">';
+    if (flags.length){ h += '<div class="flagrow">'; flags.forEach(f=>{ h += '<span class="flag l'+f.lvl+'">'+f.t+'</span>'; }); h += '</div>'; }
     h += '<div class="volhead"><span class="vh disp" style="font-size:19px">'+esc(a.name)+'</span>'
       +'<span class="delta num '+(a.wkN>=WEEK_TARGET?"up":"down")+'">'+a.wkN+'/'+WEEK_TARGET+' this wk</span></div>';
     h += '<p class="statline num">'+(a.last?("Last trained "+fmtDate(a.last)):"Never trained")+' \u00B7 '+a.total+' sessions \u00B7 '+(a.wkVol>=1000?(a.wkVol/1000).toFixed(1)+"k":a.wkVol)+' lb this week</p>';
@@ -2078,12 +2486,17 @@ function renderCoach(){
     coachData.programs.forEach(p=>{ h += '<option value="'+p.id+'"'+(p.id===a.program_id?' selected':'')+'>'+esc(p.name)+'</option>'; });
     h += '</select></div></div>';
   });
+    h += '<h2 class="sect disp a">Programs</h2><div class="panel a">';
+  coachData.programs.forEach(p=>{
+    h += '<div class="trow"><span class="d">'+esc(p.name)+'</span><span class="s"><button class="silink" onclick="openProgEdit(\''+p.id+'\')">Edit</button></span></div>';
+  });
+  h += '<button class="silink" onclick="openProgEdit(null)">+ New program</button></div>';
   return h;
 }
 
 // ================= Manual backup =================
 function exportData(){
-  const blob = new Blob([JSON.stringify({sessions},null,1)],{type:"application/json"});
+  const blob = new Blob([JSON.stringify({sessions, deloadSkips, metrics},null,1)],{type:"application/json"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "iron-log-backup-"+new Date().toISOString().slice(0,10)+".json";

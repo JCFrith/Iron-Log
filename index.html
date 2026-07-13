@@ -500,6 +500,17 @@
     border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text);
     font-weight:800; font-size:14px;
   }
+  .whooprow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .recdot { flex:none; width:11px; height:11px; border-radius:99px; }
+  .recdot.ok { background:var(--ok); box-shadow:0 0 10px rgba(74,222,128,.5); }
+  .recdot.warn { background:var(--warn); box-shadow:0 0 10px rgba(251,191,36,.5); }
+  .recdot.bad { background:var(--danger); box-shadow:0 0 10px rgba(252,165,165,.5); }
+  .rectext { color:var(--dim); font-size:13.5px; font-weight:700; }
+  .rectext b { color:var(--text); }
+  .recnote { flex-basis:100%; color:var(--warn); font-size:12.5px; font-weight:700; }
+  .flag.rec.ok { background:rgba(74,222,128,.12); color:var(--ok); border:1px solid rgba(74,222,128,.3); }
+  .flag.rec.warn { background:rgba(251,191,36,.12); color:var(--warn); border:1px solid rgba(251,191,36,.3); }
+  .flag.rec.bad { background:rgba(252,165,165,.14); color:var(--danger); border:1px solid rgba(252,165,165,.3); }
   .coachmsg { border-color:rgba(var(--accent-rgb),.45); }
   .coachhn { color:var(--accent-hi); }
   .notearea { width:100%; min-height:52px; border-radius:12px; border:1px solid var(--border);
@@ -670,7 +681,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "10.1";
+const APP_VERSION = "10.2";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -873,6 +884,42 @@ function updateNetBadge(){
 // ---------- coach ----------
 let coachData = null;
 let myCoachNotes = [];      // notes addressed to me (athlete)
+let whoopRec = null;        // my recovery cache row
+const WHOOP_FN = SUPA + "/functions/v1/whoop-callback";
+async function loadWhoop(){
+  if (!auth) return;
+  try {
+    const r = await sb("/rest/v1/whoop_recovery?select=*&user_id=eq."+auth.uid);
+    if (r.ok){ const rows = await r.json(); whoopRec = rows[0] || null; }
+  } catch(e){}
+}
+async function whoopSync(silent){
+  if (!auth) return;
+  try {
+    const r = await fetch(WHOOP_FN, { method:"POST",
+      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.access },
+      body: JSON.stringify({action:"sync"}) });
+    const j = await r.json();
+    if (j.synced){ await loadWhoop(); render(); }
+    else if (!silent && j.reconnect) toast("WHOOP link expired \u2014 reconnect from the menu.");
+  } catch(e){ if (!silent) toast("WHOOP sync failed."); }
+}
+function whoopConnect(){
+  if (!auth){ toast("Sign in first."); return; }
+  window.location.href = WHOOP_FN + "?action=start&token=" + encodeURIComponent(auth.access);
+}
+async function whoopDisconnect(){
+  if (!confirm("Disconnect WHOOP? Recovery data stops flowing to Iron Log.")) return;
+  try {
+    await fetch(WHOOP_FN, { method:"POST",
+      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.access },
+      body: JSON.stringify({action:"disconnect"}) });
+    whoopRec = null; menuOpen = false;
+    toast("WHOOP disconnected.");
+    render();
+  } catch(e){ toast("Couldn\u2019t disconnect \u2014 try again."); }
+}
+function recBand(score){ return score>=67?"ok":score>=34?"warn":"bad"; }
 let coachNoteDrafts = {};   // coach: sessionId -> draft text
 async function loadMyCoachNotes(){
   if (!auth) return;
@@ -1087,16 +1134,24 @@ function trendMark(cur, prev){
   if (cr<pr) return '<span class="tr dn">\u25BC</span>';
   return '<span class="tr flat">\u2013</span>';
 }
+let coachWhoopSynced = false;
 async function loadCoach(){
-  const [pr, lr, gr, nr] = await Promise.all([
+  if (!coachWhoopSynced && auth){
+    coachWhoopSynced = true;
+    fetch(WHOOP_FN, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.access },
+      body: JSON.stringify({action:"sync", all:true}) }).catch(()=>{});
+  }
+  const [pr, lr, gr, nr, wr] = await Promise.all([
     sb("/rest/v1/profiles?select=user_id,display_name,program_id"),
     sb("/rest/v1/logs?select=user_id,data,updated_at"),
     sb("/rest/v1/programs?select=id,name"),
     sb("/rest/v1/coach_notes?select=athlete,session_id,body,created_at&order=created_at.desc&limit=400"),
+    sb("/rest/v1/whoop_recovery?select=user_id,recovery_score,sleep_hours,updated_at"),
   ]);
   if (!pr.ok || !lr.ok || !gr.ok) throw 0;
   const profs = await pr.json(), logs = await lr.json(), progs = await gr.json();
   const allNotes = nr.ok ? await nr.json() : [];
+  const allRec = wr.ok ? await wr.json() : [];
   const logMap = {}; logs.forEach(l=>{ logMap[l.user_id]=l; });
   coachData = { athletes: profs.map(p=>{
       const l = logMap[p.user_id];
@@ -1109,7 +1164,7 @@ async function loadCoach(){
       });
       let lastNote = null;
       for (let i=ss.length-1;i>=0;i--){ if (ss[i].note){ lastNote={t:ss[i].note, d:ss[i].date}; break; } }
-      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss, notes:allNotes.filter(n=>n.athlete===p.user_id) };
+      return { uid:p.user_id, name:p.display_name||"(unnamed)", program_id:p.program_id, total:ss.length, wkN, wkVol:Math.round(wkVol), last, lastNote, sessions:ss, notes:allNotes.filter(n=>n.athlete===p.user_id), rec:allRec.find(r=>r.user_id===p.user_id)||null };
     }), programs: progs };
 }
 async function assignProgram(uid, pid){
@@ -1143,6 +1198,13 @@ async function afterAuth(){
     const added = await pullMergePush();
     if (tagLegacySessions()) pushLog();
     await loadMyCoachNotes();
+    await loadWhoop();
+    if (whoopRec && Date.now()-new Date(whoopRec.updated_at).getTime() > 3*3600000) whoopSync(true);
+    try {
+      const q = new URLSearchParams(location.search);
+      if (q.get("whoop")==="connected"){ toast("WHOOP connected."); history.replaceState(null,"",location.pathname); whoopSync(true); }
+      if (q.get("whoop")==="error"){ toast("WHOOP connection failed \u2014 try again."); history.replaceState(null,"",location.pathname); }
+    } catch(e){}
     netState="live"; updateNetBadge();
     if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
     if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
@@ -1240,6 +1302,7 @@ function renderTut(){
   h += T("Plate calculator", "The barbell icon on each lift opens the calculator preloaded with your entered weight, a warm-up ramp to your work sets, and the exact plates drawn to scale. Uncheck the bar for plate-loaded machines \u2014 it switches to total plates.");
   h += T("Body & activity", "Log bodyweight (and waist) in Progress \u2014 the 30-day trend next to your training volume is the real scoreboard. Yoga, cardio, and walks log via <b>+ Log an activity</b> and count toward your weekly target.");
   h += T("Fixing mistakes", "Tap \u270E on any session in Progress \u2192 Activity to correct weights and reps, or delete it entirely. Fat-fingered a 900 lb leg press? Gone, and your PRs recalculate.");
+  h += T("WHOOP", "Connect WHOOP from this menu and your morning recovery, HRV, and sleep appear on the Session tab. Green (67%+): train as planned. Red (under 34%): the app suggests easing off \u2014 your call, or your coach\u2019s.");
   h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
   h += T("Deload weeks", "Every 7th training week the app cuts loads to ~50% automatically. Take it \u2014 that\u2019s when growth consolidates. Or hit Skip and the counter resets.");
   h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Saved sessions sync to your account, so your history follows you to any device.");
@@ -1340,6 +1403,9 @@ function renderMenu(){
     h += '<button class="themebtn'+(k===theme?" on":"")+'" onclick="setTheme(\''+k+'\')"><span class="sw sw-'+k+'"></span>'+nm+'</button>';
   h += '</div>';
   h += '<button class="menuitem" onclick="toggleTut()">How Iron Log works</button>';
+  if (auth) h += (whoopRec
+    ? '<button class="menuitem" onclick="whoopDisconnect()">WHOOP connected \u2713 \u2014 disconnect</button>'
+    : '<button class="menuitem" onclick="whoopConnect()">Connect WHOOP</button>');
   h += '<a class="menuitem menulink" href="privacy.html">Privacy policy</a>';
   h += '<button class="menuitem" onclick="togglePlates()">Plate calculator</button>';
   if (auth) h += '<button class="menuout" onclick="menuOpen=false;signOut()">Sign out</button>';
@@ -1854,6 +1920,14 @@ function renderTrain(){
 
   // ===== Schedule strip =====
   h += '<button class="silink" onclick="toggleActivity()">+ Log an activity instead (yoga, cardio\u2026)</button>';
+  if (whoopRec && whoopRec.recovery_score!=null){
+    const sc = Math.round(whoopRec.recovery_score);
+    h += '<div class="panel a whooprow"><span class="recdot '+recBand(sc)+'"></span><span class="rectext"><b class="num">'+sc+'%</b> recovery'
+      +(whoopRec.hrv?' \u00B7 HRV <b class="num">'+Math.round(whoopRec.hrv)+'</b>':'')
+      +(whoopRec.sleep_hours?' \u00B7 sleep <b class="num">'+whoopRec.sleep_hours+'h</b>':'')+'</span>'
+      +(sc<34?'<span class="recnote">Rough recovery \u2014 consider pulling a set per lift or training lighter today.</span>':'')
+      +'</div>';
+  }
   {
     const un = unseenCoachNote();
     if (un){
@@ -2478,7 +2552,10 @@ function renderCoach(){
   [...coachData.athletes].sort((x,y)=>athleteFlags(y).length-athleteFlags(x).length).forEach((a,i)=>{
     const flags = athleteFlags(a);
     h += '<div class="panel a coachcard" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="openAthlete(\''+a.uid+'\')">';
-    if (flags.length){ h += '<div class="flagrow">'; flags.forEach(f=>{ h += '<span class="flag l'+f.lvl+'">'+f.t+'</span>'; }); h += '</div>'; }
+    if (flags.length || a.rec){ h += '<div class="flagrow">';
+      if (a.rec && a.rec.recovery_score!=null){ const sc=Math.round(a.rec.recovery_score);
+        h += '<span class="flag rec '+recBand(sc)+'">'+sc+'% rec</span>'; }
+      flags.forEach(f=>{ h += '<span class="flag l'+f.lvl+'">'+f.t+'</span>'; }); h += '</div>'; }
     h += '<div class="volhead"><span class="vh disp" style="font-size:19px">'+esc(a.name)+'</span>'
       +'<span class="delta num '+(a.wkN>=WEEK_TARGET?"up":"down")+'">'+a.wkN+'/'+WEEK_TARGET+' this wk</span></div>';
     h += '<p class="statline num">'+(a.last?("Last trained "+fmtDate(a.last)):"Never trained")+' \u00B7 '+a.total+' sessions \u00B7 '+(a.wkVol>=1000?(a.wkVol/1000).toFixed(1)+"k":a.wkVol)+' lb this week</p>';

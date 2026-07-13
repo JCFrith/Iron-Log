@@ -507,6 +507,16 @@
   .coachrec { margin:6px 0 0; font-size:12.5px; font-weight:700; line-height:1.5; }
   .coachrec.bad { color:var(--danger); }
   .coachrec.warn { color:var(--warn); }
+  .stagebar { display:flex; height:14px; border-radius:7px; overflow:hidden; margin:10px 0 8px; }
+  .stagebar .sg { display:block; height:100%; }
+  .stagekey { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+  .sk { display:flex; align-items:center; gap:5px; color:var(--dim); font-size:11.5px; font-weight:700; }
+  .sk i { width:9px; height:9px; border-radius:3px; }
+  .sk b { color:var(--text); }
+  .zbar { display:flex; height:6px; border-radius:4px; overflow:hidden; margin:2px 0 8px; }
+  .zbar span { display:block; height:100%; }
+  .statline .gv { color:var(--ok); }
+  .statline .wv { color:var(--warn); }
   .lastnight b { font-weight:900; }
   .lastnight .gv { color:var(--ok); }
   .lastnight .wv { color:var(--warn); }
@@ -698,7 +708,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.4";
+const APP_VERSION = "11.5";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -905,6 +915,8 @@ let whoopRec = null;        // my recovery cache row
 const WHOOP_FN = SUPA + "/functions/v1/whoop-callback";
 let whoopDays = [];   // my 30d history
 let whoopWorkouts = [];  // unimported WHOOP workouts
+let whoopAllWorkouts = [];
+let whoopBody = null;
 async function loadWhoopWorkouts(){
   if (!auth) return;
   try {
@@ -937,6 +949,10 @@ async function loadWhoop(){
     if (r.ok){ const rows = await r.json(); whoopRec = rows[0] || null; }
     const d = await sb("/rest/v1/whoop_days?select=*&user_id=eq."+auth.uid+"&order=day.asc");
     if (d.ok) whoopDays = await d.json();
+    const aw = await sb("/rest/v1/whoop_workouts?select=*&user_id=eq."+auth.uid+"&order=start_at.desc&limit=20");
+    if (aw.ok) whoopAllWorkouts = await aw.json();
+    const bb = await sb("/rest/v1/whoop_body?select=*&user_id=eq."+auth.uid);
+    if (bb.ok){ const r = await bb.json(); whoopBody = r[0]||null; }
   } catch(e){}
 }
 function avgOf(rows, f, n){
@@ -1005,6 +1021,117 @@ function overlayChart(days, sessions4){
     + dots + xlab + '</svg>'
     + '<p class="statline"><b>Bars (left):</b> weekly training volume \u00B7 <b>Line (right):</b> average recovery that week. Volume climbing while recovery falls is the pattern to catch.</p>';
 }
+function sleepPanel(rows){
+  if (!rows || !rows.length) return "";
+  const last = rows[rows.length-1];
+  if (last.sleep_hours==null) return "";
+  const H = h=>h!=null ? Math.floor(h)+"h "+Math.round((h%1)*60)+"m" : "\u2013";
+  const need = last.sleep_need_hours;
+  const got = last.sleep_hours;
+  const gap = (need!=null && got!=null) ? Math.round((got-need)*60) : null;
+  let h = '<h2 class="sect disp a">Sleep</h2><div class="panel a">';
+  h += '<div class="volhead"><span class="vh disp num">'+H(got)+'</span>'
+    +(gap!=null?'<span class="delta num '+(gap>=0?"up":"down")+'">'+(gap>=0?"+":"")+gap+'m vs need</span>':'')+'</div>';
+  // stage bar
+  const stages = [
+    {k:"deep_hours",  n:"Deep",  c:"var(--accent-deep)"},
+    {k:"rem_hours",   n:"REM",   c:"var(--accent)"},
+    {k:"light_hours", n:"Light", c:"rgba(var(--accent-rgb),.45)"},
+    {k:"awake_hours", n:"Awake", c:"rgba(255,255,255,.13)"},
+  ].filter(s=>last[s.k]!=null);
+  const tot = stages.reduce((a,s)=>a+last[s.k],0);
+  if (tot>0){
+    h += '<div class="stagebar">';
+    stages.forEach(s=>{ h += '<span class="sg" style="width:'+(last[s.k]/tot*100)+'%;background:'+s.c+'" title="'+s.n+'"></span>'; });
+    h += '</div><div class="stagekey">';
+    stages.forEach(s=>{ h += '<span class="sk"><i style="background:'+s.c+'"></i>'+s.n+' <b class="num">'+H(last[s.k])+'</b></span>'; });
+    h += '</div>';
+  }
+  // the coaching read
+  const deep = last.deep_hours, rem = last.rem_hours;
+  const reads = [];
+  if (deep!=null && got) reads.push({ok: deep/got>=0.13, t:"Deep sleep "+Math.round(deep/got*100)+"% of the night"+(deep/got>=0.13?" \u2014 solid physical recovery.":" \u2014 low; deep sleep is where tissue repair happens.")});
+  if (rem!=null && got) reads.push({ok: rem/got>=0.20, t:"REM "+Math.round(rem/got*100)+"%"+(rem/got>=0.20?" \u2014 in range.":" \u2014 low; alcohol and late meals are the usual suspects.")});
+  if (last.sleep_consistency!=null) reads.push({ok:last.sleep_consistency>=70, t:"Consistency "+Math.round(last.sleep_consistency)+"%"+(last.sleep_consistency>=70?" \u2014 your body knows when bed happens.":" \u2014 irregular bedtimes cost you more recovery than short nights do.")});
+  reads.forEach(r=>{ h += '<p class="statline"><span class="'+(r.ok?"gv":"wv")+'">\u25CF</span> '+r.t+'</p>'; });
+  if (last.nap_hours) h += '<p class="statline">Plus a nap: <b>'+H(last.nap_hours)+'</b>.</p>';
+  // 14-day sleep chart
+  const sl = rows.slice(-14).filter(r=>r.sleep_hours!=null).map(r=>({label:fmtDate(r.day), value:r.sleep_hours}));
+  if (sl.length>2){
+    h += svgLine(sl, {unit:"h"});
+    h += '<p class="statline">Sleep, last 14 nights \u00B7 7-day avg <b>'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h</b>'
+      + (avgOf(rows,"sleep_need_hours",7)!=null?' vs need <b>'+avgOf(rows,"sleep_need_hours",7)+'h</b>':'')+'</p>';
+  }
+  h += '</div>';
+  return h;
+}
+function strainPanel(rows){
+  if (!rows || !rows.length) return "";
+  const last = rows[rows.length-1];
+  if (last.strain==null && last.calories==null) return "";
+  let h = '<h2 class="sect disp a">Daily strain</h2><div class="panel a">';
+  h += '<div class="bmetrics" style="margin:0 0 12px">'
+    + '<div class="bm"><span class="v num">'+(last.strain??"\u2013")+'</span><span class="l">Strain yesterday</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"strain",7)??"\u2013")+' '+trendArrow(rows,"strain")+'</span><span class="l">Strain 7 Day</span></div>'
+    + '<div class="bm"><span class="v num">'+(last.calories!=null?fmtK(last.calories):"\u2013")+'</span><span class="l">Calories burned</span></div>'
+    + '</div>';
+  h += '<div class="bmetrics" style="margin:0 0 12px">'
+    + '<div class="bm"><span class="v num">'+(last.avg_hr??"\u2013")+'</span><span class="l">Avg HR</span></div>'
+    + '<div class="bm"><span class="v num">'+(last.max_hr??"\u2013")+'</span><span class="l">Max HR</span></div>'
+    + '<div class="bm"><span class="v num">'+(avgOf(rows,"rhr",7)??"\u2013")+' '+trendArrow(rows,"rhr")+'</span><span class="l">Resting HR 7 Day</span></div>'
+    + '</div>';
+  const st = rows.slice(-14).filter(r=>r.strain!=null).map(r=>({label:fmtDate(r.day), value:r.strain}));
+  if (st.length>2){ h += svgLine(st, {min:0, max:21}); h += '<p class="statline">Day strain, last 14 days \u00B7 WHOOP\u2019s 0\u201321 scale.</p>'; }
+  // honest read
+  const s7 = avgOf(rows,"strain",7), r7 = avgOf(rows,"recovery_score",7);
+  if (s7!=null && r7!=null){
+    if (s7>=14 && r7<50) h += '<p class="statline" style="color:var(--warn)">High strain ('+s7+') on low recovery ('+r7+'%) \u2014 you\u2019re outspending what you\u2019re banking.</p>';
+    else if (s7<10 && r7>=70) h += '<p class="statline">Recovery is high and strain is light \u2014 room to push if the program calls for it.</p>';
+  }
+  h += '</div>';
+  return h;
+}
+function workoutsPanel(list){
+  if (!list || !list.length) return "";
+  let h = '<h2 class="sect disp a">WHOOP workouts</h2><div class="panel a"><div class="trendrows">';
+  list.slice(0,8).forEach(w=>{
+    const mins = w.end_at ? Math.round((new Date(w.end_at)-new Date(w.start_at))/60000) : 0;
+    const bits = [];
+    if (mins) bits.push(mins+" min");
+    if (w.strain!=null) bits.push("strain "+w.strain);
+    if (w.avg_hr) bits.push("avg "+w.avg_hr+" bpm");
+    if (w.distance_m) bits.push((w.distance_m/1609.34).toFixed(2)+" mi");
+    h += '<div class="trow"><span class="d">'+esc(w.sport||"Workout")+' \u00B7 '+fmtDate(w.start_at)+'</span>'
+      +'<span class="s num">'+bits.join(" \u00B7 ")+'</span></div>';
+    const z = w.zone_minutes;
+    if (z && (z.z3||z.z4||z.z5)){
+      const zt = (z.z1||0)+(z.z2||0)+(z.z3||0)+(z.z4||0)+(z.z5||0);
+      if (zt>0){
+        h += '<div class="zbar">';
+        [["z1","rgba(255,255,255,.12)"],["z2","rgba(var(--accent-rgb),.3)"],["z3","rgba(var(--accent-rgb),.55)"],["z4","var(--accent)"],["z5","var(--danger)"]]
+          .forEach(([k,c])=>{ if (z[k]) h += '<span style="width:'+(z[k]/zt*100)+'%;background:'+c+'"></span>'; });
+        h += '</div>';
+      }
+    }
+  });
+  h += '</div><p class="statline">Recorded by WHOOP. Bars show time in heart-rate zones \u2014 the darker the band, the harder the effort.</p></div>';
+  return h;
+}
+function bodyPanelWhoop(){
+  if (!whoopBody) return "";
+  const b = whoopBody;
+  const lb = b.weight_kg!=null ? Math.round(b.weight_kg*2.20462*10)/10 : null;
+  const ft = b.height_m!=null ? (()=>{ const inches=b.height_m*39.3701; return Math.floor(inches/12)+"\u2032"+Math.round(inches%12)+"\u2033"; })() : null;
+  if (lb==null && ft==null && b.max_hr==null) return "";
+  let h = '<h2 class="sect disp a">WHOOP profile</h2><div class="panel a"><div class="bmetrics" style="margin:0">'
+    + '<div class="bm"><span class="v num">'+(lb!=null?lb+' lb':'\u2013')+'</span><span class="l">Weight (WHOOP)</span></div>'
+    + '<div class="bm"><span class="v num">'+(ft||'\u2013')+'</span><span class="l">Height</span></div>'
+    + '<div class="bm"><span class="v num">'+(b.max_hr??'\u2013')+'</span><span class="l">Max HR</span></div>'
+    + '</div>';
+  if (lb!=null) h += '<p class="statline">From your WHOOP profile \u2014 only as current as what you last entered there. Iron Log\u2019s Body panel is the one that drives your trend.</p>';
+  h += '</div>';
+  return h;
+}
 function whoopPanel(rows, title, sessions4){
   if (!rows || rows.length<2) return "";
   let h = '<h2 class="sect disp a">'+title+'</h2><div class="panel a">';
@@ -1016,11 +1143,22 @@ function whoopPanel(rows, title, sessions4){
     + '<div class="bm"><span class="v num">'+(avgOf(rows,"hrv",7)??"\u2013")+' '+trendArrow(rows,"hrv")+'</span><span class="l">HRV 7 Day</span></div>'
     + '<div class="bm"><span class="v num">'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h '+trendArrow(rows,"sleep_hours")+'</span><span class="l">Sleep 7 Day</span></div>'
     + '</div>';
-  if (spo2!=null || stF!=null){
+  const rr = lastRow.resp_rate;
+  if (spo2!=null || stF!=null || rr!=null){
     h += '<div class="bmetrics" style="margin:0 0 12px">'
       + '<div class="bm"><span class="v num">'+(spo2!=null?spo2+'%':'\u2013')+'</span><span class="l">SpO\u2082 last night</span></div>'
+      + '<div class="bm"><span class="v num">'+(rr!=null?rr:'\u2013')+'</span><span class="l">Resp rate last night</span></div>'
       + '<div class="bm"><span class="v num">'+(stF!=null?stF+'\u00B0F':'\u2013')+'</span><span class="l">Skin temp last night</span></div>'
       + '</div>';
+    // illness watch: any two of the three deviating from 14d baseline
+    const base = (f)=>avgOf(rows.slice(0,-1),f,14);
+    const flags=[];
+    const rrB=base("resp_rate"), spB=base("spo2"), stB=base("skin_temp_c");
+    if (rr!=null && rrB && rr >= rrB+1) flags.push("respiratory rate up");
+    if (spo2!=null && spB && spo2 <= spB-1) flags.push("SpO\u2082 down");
+    if (lastRow.skin_temp_c!=null && stB && lastRow.skin_temp_c >= stB+0.5) flags.push("skin temp up");
+    if (flags.length>=2)
+      h += '<p class="statline" style="color:var(--warn)">Two illness markers off your 14-day baseline ('+flags.join(", ")+'). Not a diagnosis \u2014 but worth an easy day.</p>';
   }
   h += svgLine(rows.slice(-30).filter(r=>r.recovery_score!=null).map(r=>({label:fmtDate(r.day), value:r.recovery_score})), {min:0, max:100, unit:"%"});
 
@@ -2562,6 +2700,10 @@ function renderProgress(){
   const delta = prev>0 ? Math.round((cur-prev)/prev*100) : null;
 
   let h = whoopPanel(whoopDays, "Recovery", sessions);
+  h += sleepPanel(whoopDays);
+  h += strainPanel(whoopDays);
+  h += workoutsPanel(whoopAllWorkouts);
+  h += bodyPanelWhoop();
   h += '<h2 class="sect disp a">Body</h2><div class="panel a">';
   {
     const cur = metrics.length ? metrics[metrics.length-1] : null;
@@ -2746,6 +2888,8 @@ function renderAthleteDetail(){
     return h;
   }
   h += whoopPanel(a.days, "Recovery \u0026 sleep", a.sessions);
+  h += sleepPanel(a.days);
+  h += strainPanel(a.days);
   // lift table
   h += '<div class="panel a"><table class="lifttab"><thead><tr><th>Lift</th><th>Sets</th><th></th></tr></thead><tbody>';
   for (const [exId, sets] of Object.entries(s.entries||{})){

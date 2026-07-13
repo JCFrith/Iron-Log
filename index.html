@@ -507,6 +507,13 @@
   .coachrec { margin:6px 0 0; font-size:12.5px; font-weight:700; line-height:1.5; }
   .coachrec.bad { color:var(--danger); }
   .coachrec.warn { color:var(--warn); }
+  .sleepbars { margin:12px 0 6px; }
+  .sbrow { display:flex; align-items:center; gap:9px; margin-bottom:7px; }
+  .sbday { flex:none; width:32px; color:var(--faint); font-size:11px; font-weight:900; letter-spacing:.04em; }
+  .sbtrack { position:relative; flex:1; height:16px; border-radius:8px; background:rgba(255,255,255,.05); overflow:visible; }
+  .sbfill { display:block; height:100%; border-radius:8px; transition:width .3s var(--sp); }
+  .sbneed { position:absolute; top:-3px; width:2px; height:22px; background:rgba(255,255,255,.35); border-radius:1px; }
+  .sbval { flex:none; width:42px; text-align:right; font-size:12.5px; font-weight:900; }
   .stagebar { display:flex; height:14px; border-radius:7px; overflow:hidden; margin:10px 0 8px; }
   .stagebar .sg { display:block; height:100%; }
   .stagekey { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
@@ -708,7 +715,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.5";
+const APP_VERSION = "11.6";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -1021,6 +1028,13 @@ function overlayChart(days, sessions4){
     + dots + xlab + '</svg>'
     + '<p class="statline"><b>Bars (left):</b> weekly training volume \u00B7 <b>Line (right):</b> average recovery that week. Volume climbing while recovery falls is the pattern to catch.</p>';
 }
+function sleepColor(pct){
+  // 0.70 or less = red, 0.85 = amber, 1.0+ = green; smooth hue ramp between
+  const p = Math.max(0.6, Math.min(1.05, pct));
+  const t = (p-0.6)/(1.05-0.6);           // 0..1
+  const hue = Math.round(t*120);          // 0=red -> 120=green
+  return "hsl("+hue+",70%,55%)";
+}
 function sleepPanel(rows){
   if (!rows || !rows.length) return "";
   const last = rows[rows.length-1];
@@ -1055,12 +1069,32 @@ function sleepPanel(rows){
   if (last.sleep_consistency!=null) reads.push({ok:last.sleep_consistency>=70, t:"Consistency "+Math.round(last.sleep_consistency)+"%"+(last.sleep_consistency>=70?" \u2014 your body knows when bed happens.":" \u2014 irregular bedtimes cost you more recovery than short nights do.")});
   reads.forEach(r=>{ h += '<p class="statline"><span class="'+(r.ok?"gv":"wv")+'">\u25CF</span> '+r.t+'</p>'; });
   if (last.nap_hours) h += '<p class="statline">Plus a nap: <b>'+H(last.nap_hours)+'</b>.</p>';
-  // 14-day sleep chart
-  const sl = rows.slice(-14).filter(r=>r.sleep_hours!=null).map(r=>({label:fmtDate(r.day), value:r.sleep_hours}));
-  if (sl.length>2){
-    h += svgLine(sl, {unit:"h"});
-    h += '<p class="statline">Sleep, last 14 nights \u00B7 7-day avg <b>'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h</b>'
-      + (avgOf(rows,"sleep_need_hours",7)!=null?' vs need <b>'+avgOf(rows,"sleep_need_hours",7)+'h</b>':'')+'</p>';
+  // 7-night horizontal bars, colored by % of that night's sleep need met
+  const wk = rows.slice(-7).filter(r=>r.sleep_hours!=null);
+  if (wk.length){
+    const maxH = Math.max(...wk.map(r=>Math.max(r.sleep_hours, r.sleep_need_hours||0)), 8);
+    const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    h += '<div class="sleepbars">';
+    wk.forEach(r=>{
+      const need = r.sleep_need_hours || 8;
+      const pct = r.sleep_hours/need;
+      const col = sleepColor(pct);
+      const d = new Date(r.day+"T12:00:00");
+      const needX = Math.min(100, (need/maxH)*100);
+      h += '<div class="sbrow">'
+        +'<span class="sbday">'+DOW[d.getDay()]+'</span>'
+        +'<span class="sbtrack">'
+          +'<span class="sbfill" style="width:'+Math.min(100,(r.sleep_hours/maxH)*100)+'%;background:'+col+'"></span>'
+          +'<span class="sbneed" style="left:'+needX+'%" title="need"></span>'
+        +'</span>'
+        +'<span class="sbval num" style="color:'+col+'">'+r.sleep_hours.toFixed(1)+'h</span>'
+        +'</div>';
+    });
+    h += '</div>';
+    const avg7 = avgOf(rows,"sleep_hours",7), need7 = avgOf(rows,"sleep_need_hours",7);
+    h += '<p class="statline">Last 7 nights \u00B7 bar color = share of <b>your</b> sleep need met that night \u00B7 the tick marks need'
+      + (avg7!=null?' \u00B7 avg <b>'+avg7+'h</b>':'')
+      + (need7!=null?' of <b>'+need7+'h</b> needed':'')+'</p>';
   }
   h += '</div>';
   return h;

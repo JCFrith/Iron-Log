@@ -694,7 +694,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.1";
+const APP_VERSION = "11.2";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -993,8 +993,8 @@ function whoopPanel(rows, title, sessions4){
     + '<div class="bm"><span class="v num">'+(avgOf(rows,"hrv",7)??"\u2013")+' '+trendArrow(rows,"hrv")+'</span><span class="l">HRV 7d</span></div>'
     + '<div class="bm"><span class="v num">'+(avgOf(rows,"sleep_hours",7)??"\u2013")+'h '+trendArrow(rows,"sleep_hours")+'</span><span class="l">Sleep 7d</span></div>'
     + '</div>';
-  h += svgLine(rows.slice(-30).map(r=>({label:fmtDate(r.day), value:r.recovery_score||0})));
-  h += '<p class="statline">Recovery, last 30 days</p>';
+  h += svgLine(rows.slice(-30).filter(r=>r.recovery_score!=null).map(r=>({label:fmtDate(r.day), value:r.recovery_score})), {min:0, max:100, unit:"%"});
+  h += '<p class="statline">Recovery score, last 30 days \u00B7 0\u2013100% scale</p>';
   // sleep + strain detail
   const last = rows[rows.length-1];
   const bits = [];
@@ -2409,9 +2409,9 @@ function areaChart(data){
   const area=line+" L"+X(data.length-1)+" "+(H-padB)+" L"+X(0)+" "+(H-padB)+" Z";
   let s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="150">';
   s+='<path class="afill" id="areafill" d="'+area+'" fill="url(#areagrad)" style="opacity:0"/>';
-  s+='<path class="apath" id="areapath" d="'+line+'" fill="none" stroke="#f97316" stroke-width="2.5"/>';
+  s+='<path class="apath" id="areapath" d="'+line+'" fill="none" stroke="var(--accent-hi)" stroke-width="2.5"/>';
   data.forEach((d,i)=>{
-    s+='<circle cx="'+X(i)+'" cy="'+Y(d.value)+'" r="3" fill="#f97316"/>';
+    s+='<circle cx="'+X(i)+'" cy="'+Y(d.value)+'" r="3" fill="var(--accent-hi)"/>';
     if (i===0||i===data.length-1||data.length<=6)
       s+='<text x="'+X(i)+'" y="'+(H-5)+'" font-size="9.5" fill="#8a857e" text-anchor="middle">'+esc(d.label)+'</text>';
   });
@@ -2444,24 +2444,38 @@ function sparkSvg(vals){
   const X=i=>2+i*(W-4)/(vals.length-1);
   const Y=v=>(mn===mx)?H/2:3+(1-(v-mn)/(mx-mn))*(H-6);
   const pts=vals.map((v,i)=>[X(i),Y(v)]);
-  return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="30"><path d="'+smoothPath(pts)+'" fill="none" stroke="#f97316" stroke-width="2"/></svg>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="30"><path d="'+smoothPath(pts)+'" fill="none" stroke="var(--accent-hi)" stroke-width="2"/></svg>';
 }
-function svgLine(data){
+function svgLine(data, opts){
   if (!data.length) return '<p class="empty">No data for this lift yet.</p>';
-  const W=560,H=150,padL=34,padR=10,padT=12,padB=22;
+  opts = opts || {};
+  const W=560,H=150,padL=38,padR=10,padT=12,padB=26;
   const vals=data.map(d=>d.value);
-  let mn=Math.min(...vals), mx=Math.max(...vals);
-  if (mn===mx){ mn-=5; mx+=5; }
+  let mn, mx;
+  if (opts.min!=null && opts.max!=null){ mn=opts.min; mx=opts.max; }
+  else {
+    mn=Math.min(...vals); mx=Math.max(...vals);
+    if (mn===mx){ mn-=5; mx+=5; }
+  }
+  const unit = opts.unit || "";
   const X=i=>data.length===1?W/2:padL+i*(W-padL-padR)/(data.length-1);
-  const Y=v=>padT+(1-(v-mn)/(mx-mn))*(H-padT-padB);
+  const Y=v=>padT+(1-(v-mn)/(mx-mn||1))*(H-padT-padB);
   const pts=data.map((d,i)=>[X(i),Y(d.value)]);
+  const maxTicks = 6;
+  const step = Math.max(1, Math.ceil(data.length/maxTicks));
+  const showLabel = i => i===data.length-1 || (data.length-1-i) % step === 0;
   let s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="160">';
-  s+='<text x="4" y="'+(Y(mx)+4)+'" font-size="10" fill="#8a857e">'+mx+'</text>';
-  s+='<text x="4" y="'+(Y(mn)+4)+'" font-size="10" fill="#8a857e">'+mn+'</text>';
-  s+='<path id="trendpath" class="apath" d="'+smoothPath(pts)+'" fill="none" stroke="#f97316" stroke-width="2.5"/>';
+  const mid = Math.round((mn+mx)/2);
+  [[mx,Y(mx)],[mid,Y(mid)],[mn,Y(mn)]].forEach(([v,y],k)=>{
+    if (k===1 && (mid===mx || mid===mn)) return;
+    s+='<line x1="'+padL+'" y1="'+y+'" x2="'+(W-padR)+'" y2="'+y+'" stroke="rgba(255,255,255,.05)" stroke-width="1"/>';
+    s+='<text x="4" y="'+(y+4)+'" font-size="10" fill="#8a857e">'+v+unit+'</text>';
+  });
+  s+='<path id="trendpath" class="apath" d="'+smoothPath(pts)+'" fill="none" stroke="var(--accent-hi)" stroke-width="2.5"/>';
   data.forEach((d,i)=>{
-    s+='<circle cx="'+X(i)+'" cy="'+Y(d.value)+'" r="3.5" fill="#f97316"/>';
-    s+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="#8a857e" text-anchor="middle">'+esc(d.label)+'</text>';
+    s+='<circle cx="'+X(i)+'" cy="'+Y(d.value)+'" r="3.5" fill="var(--accent-hi)"/>';
+    if (showLabel(i))
+      s+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="#8a857e" text-anchor="middle">'+esc(d.label)+'</text>';
   });
   return s+'</svg>';
 }
@@ -2484,7 +2498,7 @@ function renderLiftDetail(){
   const prevE1 = e1s.length>1?e1s[e1s.length-2]:null;
   h += '<div class="panel a"><div class="volhead"><span class="vh disp num">'+(rows.length? (bw? rows[rows.length-1].bestR+(" reps") : rows[rows.length-1].topW+" lb") : "\u2013")+'</span>'
     +(curE1?'<span class="delta num '+(prevE1&&curE1<prevE1?"down":"up")+'">e1RM '+curE1+(prevE1?(curE1>=prevE1?' \u2191':' \u2193'):'')+'</span>':'')
-    +'</div>'+svgLine(chart.slice(-16))
+    +'</div>'+svgLine(chart.slice(-16), bw?{}:{unit:" lb"})
     +'<p class="statline">'+(bw?'Best reps per session':'Top set per session')+(curE1?' \u00B7 e1RM (Epley) from best set, deloads excluded':'')+'</p></div>';
   // PR history for this lift
   const prs = prLog().filter(p=>p.id===progLift).reverse();
@@ -2516,7 +2530,7 @@ function renderProgress(){
     const d30 = metricDelta(30);
     h += '<div class="volhead"><span class="vh disp num">'+(cur? cur.w+' lb' : '\u2013')+'</span>'
       +(d30!==null?'<span class="delta num '+(d30<=0?"up":"down")+'">'+(d30>0?'+':'')+d30+' lb / 30d</span>':'')+'</div>';
-    if (metrics.length>1) h += svgLine(metrics.slice(-16).map(m=>({label:fmtDate(m.date), value:m.w})));
+    if (metrics.length>1) h += svgLine(metrics.slice(-16).map(m=>({label:fmtDate(m.date), value:m.w})), {unit:" lb"});
     h += '<div class="namerow" style="margin-top:10px"><input inputmode="decimal" placeholder="Weight" value="'+esc(bwDraft.w)+'" onchange="bwDraft.w=this.value">'
       +'<input inputmode="decimal" placeholder="Waist (optional)" value="'+esc(bwDraft.waist)+'" onchange="bwDraft.waist=this.value">'
       +'<button class="sibtn" onclick="logMetric()">Log</button></div>';

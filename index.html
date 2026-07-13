@@ -494,6 +494,7 @@
   .gtrack { flex:1; height:9px; border-radius:99px; background:rgba(255,255,255,.05); overflow:hidden; }
   .gfill { display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,var(--accent-deep),var(--accent-hi)); }
   .gp { flex:none; width:36px; text-align:right; color:var(--text); font-size:12px; font-weight:800; }
+  .menulink { display:flex; align-items:center; justify-content:center; text-decoration:none; }
   .menuitem {
     width:100%; min-height:46px; margin-top:14px; border-radius:13px;
     border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text);
@@ -669,7 +670,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "10.0";
+const APP_VERSION = "10.1";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -1339,6 +1340,7 @@ function renderMenu(){
     h += '<button class="themebtn'+(k===theme?" on":"")+'" onclick="setTheme(\''+k+'\')"><span class="sw sw-'+k+'"></span>'+nm+'</button>';
   h += '</div>';
   h += '<button class="menuitem" onclick="toggleTut()">How Iron Log works</button>';
+  h += '<a class="menuitem menulink" href="privacy.html">Privacy policy</a>';
   h += '<button class="menuitem" onclick="togglePlates()">Plate calculator</button>';
   if (auth) h += '<button class="menuout" onclick="menuOpen=false;signOut()">Sign out</button>';
   h += '<p class="menuver num">Iron Log v'+APP_VERSION+'</p>';

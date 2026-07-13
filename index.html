@@ -499,6 +499,29 @@
     border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text);
     font-weight:800; font-size:14px;
   }
+  .barchk { display:flex; align-items:center; gap:9px; margin:2px 0 12px; color:var(--dim); font-size:13px; font-weight:700; }
+  .barchk input { width:20px; height:20px; accent-color:var(--accent); flex:none; }
+  .tutb { padding:11px 0; border-top:1px solid var(--border); }
+  .tutb:first-of-type { border-top:0; }
+  .tuth { color:var(--accent-hi); font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; margin-bottom:4px; }
+  .tutp { margin:0; color:var(--dim); font-size:13.5px; line-height:1.55; }
+  .tutp b { color:var(--text); }
+  .barviz { display:flex; align-items:center; gap:3px; padding:16px 2px 12px; overflow-x:auto; }
+  .bshaft {
+    flex:none; width:52px; height:9px; border-radius:5px 0 0 5px;
+    background:linear-gradient(180deg,#8a8a8a,#5c5c5c);
+    display:flex; align-items:center; justify-content:center;
+    color:#0a0a0a; font-size:8.5px; font-weight:900; letter-spacing:.04em;
+  }
+  .bcollar { flex:none; width:7px; height:24px; border-radius:2px; background:linear-gradient(180deg,#9a9a9a,#606060); margin-right:2px; }
+  .bstub { flex:none; width:26px; height:9px; border-radius:0 5px 5px 0; background:linear-gradient(180deg,#8a8a8a,#5c5c5c); margin-left:2px; }
+  .pl {
+    flex:none; display:flex; align-items:center; justify-content:center;
+    border-radius:6px; color:#fff; font-weight:900;
+    background:linear-gradient(180deg,var(--accent-hi),var(--accent-deep));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25), 0 2px 6px rgba(0,0,0,.4);
+  }
+  .pl.vert { writing-mode:vertical-rl; }
   .platerow { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; }
   .plate {
     border:1px solid rgba(var(--accent-rgb),.4); background:rgba(var(--accent-rgb),.1);
@@ -618,7 +641,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "9.8";
+const APP_VERSION = "9.10";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -969,38 +992,82 @@ async function changePw(){
 
 // ---------- boot ----------
 let menuOpen = false;
-let plateOpen = false, plateW = "", plateBar = 45;
-function togglePlates(){ plateOpen = !plateOpen; menuOpen=false; render(); }
-function plateCalc(target, bar){
+let tutOpen = false;
+function toggleTut(){ tutOpen = !tutOpen; menuOpen = false; render(); }
+function renderTut(){
+  const T = (t,b)=>'<div class="tutb"><div class="tuth">'+t+'</div><p class="tutp">'+b+'</p></div>';
+  let h = '<div class="sheetback" onclick="toggleTut()"></div>';
+  h += '<div class="sheet" role="dialog" aria-label="how it works">';
+  h += '<div class="sheethead"><span class="sheettitle disp">How Iron Log works</span><span class="sheetsub">The 60-second tour</span></div>';
+  h += T("Coach targets", "Every lift card tells you what to do today. <b>Beat last</b>: same weight, one more rep. Hit the top of the rep range on every set and it flips to <b>\u25B2 Add weight</b>. First time on a lift? Set a comfortable baseline \u2014 the system takes it from there.");
+  h += T("Logging", "Tap <b>Fill session to plan</b> to load suggested weights for the whole workout (or Prefill per lift), then enter reps as you finish each set. A set only saves once it has reps \u2014 a weight of 0 is fine for bodyweight work. + Add set for extras; \u2715 removes them.");
+  h += T("Swap a lift", "Tap a lift\u2019s name to pick an alternative for that body part. The sub inherits today\u2019s sets and reps, builds its own history, and the prescribed lift returns next session.");
+  h += T("Rest timer", "Starts automatically when you enter reps. Tap the chip to skip.");
+  h += T("Notes", "\u270E on a lift for lift notes (\u201Cknee tweaked set 2\u201D); the box above Save for session notes. Your coach sees both.");
+  h += T("Plate calculator", "The barbell icon on each lift opens the calculator preloaded with your entered weight. Uncheck the bar for plate-loaded machines \u2014 it switches from per-side to total plates.");
+  h += T("Deload weeks", "Every 7th training week the app cuts loads to ~50% automatically. Take it \u2014 that\u2019s when growth consolidates. Or hit Skip and the counter resets.");
+  h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Saved sessions sync to your account, so your history follows you to any device.");
+  h += T("Progress tab", "30-day summary vs the previous 30, weekly consistency, muscle-group balance, recent PRs. Tap any lift for its full story: top-set chart, estimated 1RM trend, PR history, every session ever.");
+  if (profile && profile.is_coach) h += T("Coach tab", "Your roster: sessions this week vs target, last trained, volume, latest note. Tap an athlete for their session-by-session lift table with progress arrows. Assign programs from the dropdown.");
+  h += '</div>';
+  return h;
+}
+let plateOpen = false, plateW = "", plateInclBar = true;
+const BAR_W = 45;
+function togglePlates(){ plateOpen = !plateOpen; menuOpen = false; render(); }
+function openPlatesFor(exId){
+  let w = "";
+  const rows = values[exId] || [];
+  for (let i=rows.length-1;i>=0;i--){ if (rows[i].w!=="" && Number(rows[i].w)>0){ w = rows[i].w; break; } }
+  if (!w){
+    const e = findEx(exId);
+    if (e){ const plan = planFor(e); if (plan.sets && plan.sets[0].w>0) w = String(plan.sets[0].w); }
+  }
+  plateW = w;
+  plateOpen = true; menuOpen = false;
+  render();
+}
+function plateCalc(target, inclBar){
   const PLATES=[45,35,25,10,5,2.5];
-  let side = (target-bar)/2;
-  if (target<=0 || side<0) return null;
-  const out=[]; 
-  for (const p of PLATES){ const n=Math.floor(side/p+1e-9); if(n>0){ out.push({p,n}); side=+(side-n*p).toFixed(2); } }
-  return {plates:out, rem:side};
+  let load = inclBar ? (target-BAR_W)/2 : target;
+  if (target<=0 || load<0) return null;
+  const out=[];
+  for (const p of PLATES){ const n=Math.floor(load/p+1e-9); if(n>0){ out.push({p,n}); load=+(load-n*p).toFixed(2); } }
+  return {plates:out, rem:load};
 }
 function renderPlates(){
-  let h = '<div class="menuback" onclick="togglePlates()"></div>';
-  h += '<div class="sheet" role="dialog" aria-label="plate calculator" style="max-height:80vh">';
-  h += '<div class="sheethead"><span class="sheettitle disp">Plate calculator</span><span class="sheetsub">Per-side loading</span></div>';
-  h += '<div class="namerow" style="margin-bottom:10px"><input id="pc_w" inputmode="decimal" placeholder="Target weight" value="'+esc(plateW)+'" onchange="plateW=this.value;render()">'
-    +'<select class="progsel" onchange="plateBar=Number(this.value);render()">'
-    +'<option value="45"'+(plateBar===45?' selected':'')+'>45 lb bar</option>'
-    +'<option value="35"'+(plateBar===35?' selected':'')+'>35 lb bar</option>'
-    +'<option value="0"'+(plateBar===0?' selected':'')+'>Plate-loaded (no bar)</option>'
-    +'</select></div>';
+  let h = '<div class="sheetback" onclick="togglePlates()"></div>';
+  h += '<div class="sheet" role="dialog" aria-label="plate calculator">';
+  h += '<div class="sheethead"><span class="sheettitle disp">Plate calculator</span><span class="sheetsub">'+(plateInclBar?'Per side \u00B7 '+BAR_W+' lb bar':'Total plates \u00B7 no bar')+'</span></div>';
+  h += '<input class="fullinput" id="pc_w" inputmode="decimal" placeholder="Target weight" value="'+esc(plateW)+'" onchange="plateW=this.value;render()">';
+  h += '<label class="barchk"><input type="checkbox" '+(plateInclBar?'checked':'')+' onchange="plateInclBar=this.checked;render()"> Include '+BAR_W+' lb bar (uncheck for plate-loaded machines)</label>';
   const t = Number(plateW)||0;
   if (t>0){
-    const res = plateCalc(t, plateBar);
+    const res = plateCalc(t, plateInclBar);
     if (!res) h += '<p class="statline">Target is below the bar weight.</p>';
     else {
-      h += '<div class="platerow">';
-      if (!res.plates.length) h += '<p class="statline">Empty bar.</p>';
-      res.plates.forEach(x=>{ h += '<span class="plate"><b class="num">'+x.n+'\u00D7</b> '+x.p+'</span>'; });
-      h += '</div>';
-      if (res.rem>0) h += '<p class="statline">'+res.rem+' lb per side unloadable with standard plates \u2014 nearest is '+ (t - res.rem*2) +' lb.</p>';
+      h += '<p class="statline" style="margin-bottom:6px">'+(plateInclBar?'Load each side:':'Total plates:')+'</p>';
+      if (!res.plates.length) h += '<p class="statline">'+(plateInclBar?'Empty bar.':'Nothing to load.')+'</p>';
+      else {
+        const DIM = {45:[64,30,13],35:[57,27,12],25:[50,24,12],10:[40,19,11],5:[32,15,10],2.5:[25,12,9]};
+        const ones = [];
+        res.plates.forEach(x=>{ for(let i=0;i<x.n;i++) ones.push(x.p); });
+        h += '<div class="barviz">';
+        if (plateInclBar) h += '<span class="bshaft num">'+BAR_W+'</span><span class="bcollar"></span>';
+        ones.forEach(p=>{
+          const [ht,wd,fs] = DIM[p];
+          h += '<span class="pl'+(wd<16?' vert':'')+'" style="height:'+ht+'px;width:'+wd+'px;font-size:'+fs+'px">'+(p===2.5?'2.5':p)+'</span>';
+        });
+        if (plateInclBar) h += '<span class="bstub"></span>';
+        h += '</div>';
+        h += '<p class="statline">'+res.plates.map(x=>x.n+'\u00D7'+x.p).join(' \u00B7 ')+(plateInclBar?' per side':' total')+'</p>';
+      }
+      if (res.rem>0){
+        const nearest = plateInclBar ? (t - res.rem*2) : (t - res.rem);
+        h += '<p class="statline">'+res.rem+' lb '+(plateInclBar?'per side ':'')+'unloadable with standard plates \u2014 nearest is '+nearest+' lb.</p>';
+      }
     }
-  } else h += '<p class="statline">Enter the target weight \u2014 e.g. your next set\u2019s load.</p>';
+  } else h += '<p class="statline">Enter a target \u2014 or open this from a lift\u2019s barbell icon to load its weight automatically.</p>';
   h += '</div>';
   return h;
 }
@@ -1013,7 +1080,8 @@ function renderMenu(){
   for (const [k,nm] of Object.entries(THEMES))
     h += '<button class="themebtn'+(k===theme?" on":"")+'" onclick="setTheme(\''+k+'\')"><span class="sw sw-'+k+'"></span>'+nm+'</button>';
   h += '</div>';
-  h += '<button class="menuitem" onclick="togglePlates()">\u2696 Plate calculator</button>';
+  h += '<button class="menuitem" onclick="toggleTut()">How Iron Log works</button>';
+  h += '<button class="menuitem" onclick="togglePlates()">Plate calculator</button>';
   if (auth) h += '<button class="menuout" onclick="menuOpen=false;signOut()">Sign out</button>';
   h += '<p class="menuver num">Iron Log v'+APP_VERSION+'</p>';
   h += '</div>';
@@ -1313,7 +1381,7 @@ function render(){
   lastTabRendered = tab;
   m.innerHTML = ((!auth && !localOnly) ? renderWelcome()
     : tab==="train" ? renderTrain() : tab==="coach" ? renderCoach() : renderProgress())
-    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "");
+    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "");
   if (tab==="progress") setTimeout(animateArea, 30);
 }
 
@@ -1450,6 +1518,7 @@ function renderTrain(){
       +(e.subOf?'<span class="subnote">sub for '+esc(e.subOf.name)+'</span>':'')
       +(e.note?'<span class="exnote">'+esc(e.note)+'</span>':'')
       +'</button>'
+      +(e.bw?'':'<button class="notebtn" onclick="openPlatesFor(\''+e.id+'\')" aria-label="plates for '+esc(e.name)+'"><svg width="17" height="11" viewBox="0 0 22 12" fill="currentColor"><rect x="0" y="3" width="2.5" height="6" rx="1"/><rect x="3.5" y="1" width="3" height="10" rx="1"/><rect x="15.5" y="1" width="3" height="10" rx="1"/><rect x="19.5" y="3" width="2.5" height="6" rx="1"/><rect x="6.5" y="5" width="9" height="2" rx="1"/></svg></button>')
       +'<button class="notebtn'+((noteDrafts[e.id]&&noteDrafts[e.id].trim())||noteOpen===e.id?" on":"")+'" onclick="toggleNote(\''+e.id+'\')" aria-label="note for '+esc(e.name)+'">\u270E</button>'
       +'<span class="explan num'+(plan.mode==="add"?" hot":"")+'">'
       +(plan.mode==="deload" ? "deload" : plan.mode==="add" ? "\u25B2 +"+INC+" lb" : plan.mode==="beat" ? "beat "+plan.last.sets.map(s=>s.r).join("/") : e.min+"\u2013"+e.max+" reps")

@@ -694,7 +694,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.2";
+const APP_VERSION = "11.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -948,42 +948,58 @@ function trendArrow(rows, f){
   return d>0 ? '<span class="tr up">\u25B2</span>' : '<span class="tr dn">\u25BC</span>';
 }
 function overlayChart(days, sessions4){
-  // weekly training volume bars + weekly avg recovery line, last 8 weeks
   const wks = [];
   const now = new Date(); const dow=(now.getDay()+6)%7;
   now.setDate(now.getDate()-dow); now.setHours(0,0,0,0);
   for (let i=7;i>=0;i--){
     const ws = new Date(now.getTime()-i*7*86400000);
     const we = new Date(ws.getTime()+7*86400000);
-    const key = ws.toISOString().slice(0,10);
     let vol=0;
     sessions4.filter(s=>{const t=new Date(s.date); return t>=ws && t<we;})
       .forEach(s=>Object.values(s.entries||{}).forEach(sets=>sets.forEach(x=>{vol+=(x.w||0)*x.r;})));
     const rec = days.filter(d=>{const t=new Date(d.day+"T12:00:00"); return t>=ws && t<we;})
       .map(d=>d.recovery_score).filter(x=>x!=null);
-    wks.push({key, vol, rec: rec.length? Math.round(rec.reduce((a,b)=>a+b,0)/rec.length) : null});
+    wks.push({ws, vol, rec: rec.length? Math.round(rec.reduce((a,b)=>a+b,0)/rec.length) : null});
   }
-  if (!wks.some(w=>w.vol>0) || !wks.some(w=>w.rec!=null)) return "";
-  const W=320,H=120,P=6;
+  // Needs a real comparison to be worth showing: 3+ weeks with volume AND recovery
+  const usable = wks.filter(w=>w.vol>0 && w.rec!=null).length;
+  if (usable < 3) return "";
+
+  const W=560,H=170,padL=40,padR=40,padT=14,padB=26;
   const maxV = Math.max(...wks.map(w=>w.vol),1);
-  const bw = (W-P*2)/wks.length;
-  let bars="", line="", dots="";
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const bw = plotW/wks.length;
+  const yVol = v => padT+plotH-(v/maxV)*plotH;
+  const yRec = r => padT+plotH-(r/100)*plotH;
+  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  let bars="", line="", dots="", xlab="";
   wks.forEach((w,i)=>{
-    const x = P + i*bw;
-    const bh = Math.round((w.vol/maxV)*(H-40));
-    bars += '<rect x="'+(x+bw*0.18)+'" y="'+(H-20-bh)+'" width="'+(bw*0.64)+'" height="'+bh+'" rx="3" fill="rgba(var(--accent-rgb),.35)"/>';
-    if (w.rec!=null){
-      const y = 10 + (100-w.rec)/100*(H-40);
-      const cx = x+bw/2;
-      line += (line?" L":"M")+cx+" "+y;
-      dots += '<circle cx="'+cx+'" cy="'+y+'" r="3" fill="'+(w.rec>=67?"var(--ok)":w.rec>=34?"var(--warn)":"var(--danger)")+'"/>';
+    const x = padL + i*bw;
+    if (w.vol>0){
+      const y = yVol(w.vol);
+      bars += '<rect x="'+(x+bw*0.2)+'" y="'+y+'" width="'+(bw*0.6)+'" height="'+(padT+plotH-y)+'" rx="3" fill="rgba(var(--accent-rgb),.3)"/>';
     }
+    if (w.rec!=null){
+      const cx=x+bw/2, cy=yRec(w.rec);
+      line += (line?" L":"M")+cx+" "+cy;
+      dots += '<circle cx="'+cx+'" cy="'+cy+'" r="3.5" fill="'+(w.rec>=67?"var(--ok)":w.rec>=34?"var(--warn)":"var(--danger)")+'"/>';
+    }
+    if (i%2===0 || i===wks.length-1)
+      xlab += '<text x="'+(x+bw/2)+'" y="'+(H-7)+'" font-size="9" fill="#8a857e" text-anchor="middle">'+MON[w.ws.getMonth()]+" "+w.ws.getDate()+'</text>';
   });
-  return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" preserveAspectRatio="none">'
-    + bars
-    + (line?'<path d="'+line+'" fill="none" stroke="var(--text)" stroke-width="1.5" opacity=".75"/>':'')
-    + dots + '</svg>'
-    + '<p class="statline">Bars: weekly volume \u00B7 Dots/line: average recovery. Volume climbing while recovery falls is the pattern to catch.</p>';
+  // axes: volume left, recovery right
+  let ax = '';
+  [0,0.5,1].forEach(f=>{
+    const y = padT+plotH-f*plotH;
+    ax += '<line x1="'+padL+'" y1="'+y+'" x2="'+(W-padR)+'" y2="'+y+'" stroke="rgba(255,255,255,.05)"/>';
+    ax += '<text x="'+(padL-5)+'" y="'+(y+4)+'" font-size="9" fill="#8a857e" text-anchor="end">'+fmtK(maxV*f)+'</text>';
+    ax += '<text x="'+(W-padR+5)+'" y="'+(y+4)+'" font-size="9" fill="#8a857e">'+Math.round(f*100)+'%</text>';
+  });
+  return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="180">'
+    + ax + bars
+    + (line?'<path d="'+line+'" fill="none" stroke="var(--text)" stroke-width="1.5" opacity=".7"/>':'')
+    + dots + xlab + '</svg>'
+    + '<p class="statline"><b>Bars (left):</b> weekly training volume \u00B7 <b>Line (right):</b> average recovery that week. Volume climbing while recovery falls is the pattern to catch.</p>';
 }
 function whoopPanel(rows, title, sessions4){
   if (!rows || rows.length<2) return "";
@@ -1012,7 +1028,7 @@ function whoopPanel(rows, title, sessions4){
   if (extras.length) h += '<p class="statline">Also: '+extras.join(" \u00B7 ")+' \u2014 informational; deviations from your own baseline can precede illness.</p>';
   if (sessions4 && sessions4.length){
     const ov = overlayChart(rows, sessions4);
-    if (ov) h += '<div class="ovl">'+ov+'</div>';
+    if (ov) h += '<div class="ovl"><div class="menusect">Training load vs recovery</div>'+ov+'</div>';
   }
   h += '</div>';
   return h;
@@ -1031,6 +1047,12 @@ async function whoopSync(silent){
 function whoopConnect(){
   if (!auth){ toast("Sign in first."); return; }
   window.location.href = WHOOP_FN + "?action=start&token=" + encodeURIComponent(auth.at);
+}
+async function whoopResync(){
+  menuOpen = false; render();
+  toast("Re-syncing WHOOP\u2026");
+  await whoopSync(false);
+  toast("WHOOP up to date.");
 }
 async function whoopDisconnect(){
   if (!confirm("Disconnect WHOOP? Recovery data stops flowing to Iron Log.")) return;
@@ -1553,7 +1575,8 @@ function renderMenu(){
   h += '</div>';
   h += '<button class="menuitem" onclick="toggleTut()">How Iron Log works</button>';
   if (auth) h += (whoopRec
-    ? '<button class="menuitem" onclick="whoopDisconnect()">WHOOP connected \u2713 \u2014 disconnect</button>'
+    ? '<button class="menuitem" onclick="whoopResync()">Re-sync WHOOP now</button>'
+      +'<button class="menuitem" onclick="whoopDisconnect()">WHOOP connected \u2713 \u2014 disconnect</button>'
     : '<button class="menuitem" onclick="whoopConnect()">Connect WHOOP</button>');
   h += '<a class="menuitem menulink" href="privacy.html">Privacy policy</a>';
   h += '<button class="menuitem" onclick="togglePlates()">Plate calculator</button>';

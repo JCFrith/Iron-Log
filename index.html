@@ -681,7 +681,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "10.2";
+const APP_VERSION = "10.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -897,7 +897,7 @@ async function whoopSync(silent){
   if (!auth) return;
   try {
     const r = await fetch(WHOOP_FN, { method:"POST",
-      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.access },
+      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"sync"}) });
     const j = await r.json();
     if (j.synced){ await loadWhoop(); render(); }
@@ -906,13 +906,13 @@ async function whoopSync(silent){
 }
 function whoopConnect(){
   if (!auth){ toast("Sign in first."); return; }
-  window.location.href = WHOOP_FN + "?action=start&token=" + encodeURIComponent(auth.access);
+  window.location.href = WHOOP_FN + "?action=start&token=" + encodeURIComponent(auth.at);
 }
 async function whoopDisconnect(){
   if (!confirm("Disconnect WHOOP? Recovery data stops flowing to Iron Log.")) return;
   try {
     await fetch(WHOOP_FN, { method:"POST",
-      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.access },
+      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"disconnect"}) });
     whoopRec = null; menuOpen = false;
     toast("WHOOP disconnected.");
@@ -1138,7 +1138,7 @@ let coachWhoopSynced = false;
 async function loadCoach(){
   if (!coachWhoopSynced && auth){
     coachWhoopSynced = true;
-    fetch(WHOOP_FN, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.access },
+    fetch(WHOOP_FN, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"sync", all:true}) }).catch(()=>{});
   }
   const [pr, lr, gr, nr, wr] = await Promise.all([

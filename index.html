@@ -507,6 +507,20 @@
   .coachrec { margin:6px 0 0; font-size:12.5px; font-weight:700; line-height:1.5; }
   .coachrec.bad { color:var(--danger); }
   .coachrec.warn { color:var(--warn); }
+  .stdrow { padding:10px 0; border-top:1px solid var(--border); }
+  .stdrow:first-child { border-top:0; padding-top:2px; }
+  .stdtop { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+  .stdname { font-weight:900; font-size:14px; }
+  .stdlvl { font-size:11px; font-weight:900; letter-spacing:.05em; text-transform:uppercase; padding:3px 9px; border-radius:99px; background:rgba(255,255,255,.07); color:var(--dim); }
+  .stdlvl.l2 { background:rgba(var(--accent-rgb),.12); color:var(--accent-hi); }
+  .stdlvl.l3 { background:rgba(var(--accent-rgb),.2); color:var(--accent-hi); }
+  .stdlvl.l4 { background:rgba(74,222,128,.14); color:var(--ok); }
+  .stdlvl.l5 { background:rgba(74,222,128,.22); color:var(--ok); }
+  .stdbar { height:7px; border-radius:4px; background:rgba(255,255,255,.06); overflow:hidden; margin-bottom:6px; }
+  .stdfill { display:block; height:100%; border-radius:4px; background:linear-gradient(90deg, rgba(var(--accent-rgb),.5), var(--accent-hi)); }
+  .stdmeta { color:var(--dim); font-size:12px; font-weight:700; }
+  .stdmeta b { color:var(--text); }
+  .restchip.plus { margin-left:6px; }
   .sleepbars { margin:12px 0 6px; }
   .sbrow { display:flex; align-items:center; gap:9px; margin-bottom:7px; }
   .sbday { flex:none; width:32px; color:var(--faint); font-size:11px; font-weight:900; letter-spacing:.04em; }
@@ -669,9 +683,10 @@ const LIBNAME = {};
 Object.values(LIB).forEach(list=>list.forEach(n=>{ LIBNAME[slug(n)] = n; }));
 const BUILTIN_SCHEDULE = {1:"A",2:"C",3:"B",4:"C",5:["A","B"],6:null,0:null};
 let WORKOUTS, SCHEDULE;
+let PROG_REST = 0;
 function applyProgram(p){
   if (!p || !p.workouts){
-    WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; programName = "";
+    WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; PROG_REST = 0; programName = "";
     if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
     return;
   }
@@ -689,6 +704,7 @@ function applyProgram(p){
   INC = p.inc || 5;
   WEEK_TARGET = p.weekTarget || 5;
   DELOAD_EVERY = (p.deloadEvery===0) ? 0 : (p.deloadEvery || 7);
+  PROG_REST = Number(p.rest) || 0;
   if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = scheduleFor(new Date().getDay()) || Object.keys(WORKOUTS)[0];
 }
 const BUILTIN_WORKOUTS = {
@@ -715,7 +731,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.6";
+const APP_VERSION = "11.7";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -1308,7 +1324,7 @@ let progEdit = null; // {id|null, name, path, data}
 const CAT_OPTS = ["","quads","hams","glutes","chest_press","incline_press","chest_fly","row","vert_pull","sh_press","side_delt","rear_delt","biceps","triceps","calves","abs"];
 async function openProgEdit(id){
   if (!id){
-    progEdit = { id:null, name:"", path:"", data:{ inc:5, weekTarget:3, deloadEvery:0, schedule:{"0":null,"1":"A","2":null,"3":"B","4":null,"5":"C","6":null},
+    progEdit = { id:null, name:"", path:"", data:{ inc:5, weekTarget:3, deloadEvery:0, rest:120, schedule:{"0":null,"1":"A","2":null,"3":"B","4":null,"5":"C","6":null},
       workouts:{ A:{label:"Workout A",tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]},
                  B:{label:"Workout B",tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]},
                  C:{label:"Workout C",tag:"STRENGTH",exercises:[{name:"",min:8,max:12,sets:3}]} } } };
@@ -1394,6 +1410,7 @@ function renderProgEdit(){
     +'<div class="field"><label>Weight inc</label><input class="fullinput num" inputmode="decimal" value="'+(P.data.inc||5)+'" onchange="pbField(\'inc\',this.value)"></div>'
     +'<div class="field"><label>Sessions/wk</label><input class="fullinput num" inputmode="numeric" value="'+(P.data.weekTarget||3)+'" onchange="pbField(\'weekTarget\',this.value)"></div>'
     +'<div class="field"><label>Deload every (wks, 0=off)</label><input class="fullinput num" inputmode="numeric" value="'+(P.data.deloadEvery||0)+'" onchange="pbField(\'deloadEvery\',this.value)"></div>'
+    +'<div class="field"><label>Rest between sets (sec)</label><input class="fullinput num" inputmode="numeric" value="'+(P.data.rest||120)+'" onchange="pbField(\'rest\',this.value)"></div>'
     +'</div>';
   h += '<div class="field"><label>Schedule (blank = rest \u00B7 \u201CA,B\u201D alternates)</label><div class="pbsched">';
   const DN=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -1664,6 +1681,7 @@ function renderTut(){
   h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
   h += T("Deload weeks", "Every 7th training week the app cuts loads to ~50% automatically. Take it \u2014 that\u2019s when growth consolidates. Or hit Skip and the counter resets.");
   h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Saved sessions sync to your account, so your history follows you to any device.");
+  h += T("Strength standards", "Your estimated 1RM on the barbell lifts, ranked against population strength standards for your bodyweight \u2014 Beginner through Elite \u2014 with the exact number that gets you to the next level. Machine lifts don\u2019t map to standards, so only barbell movements appear.");
   h += T("Progress tab", "30-day summary vs the previous 30, weekly consistency, muscle-group balance, recent PRs. Tap any lift for its full story: top-set chart, estimated 1RM trend, PR history, every session ever.");
   if (profile && profile.is_coach) h += T("Coach tab", "Your roster: sessions this week vs target, last trained, volume, latest note. Tap an athlete for their session-by-session lift table with progress arrows. Assign programs from the dropdown.");
   h += '</div>';
@@ -2376,6 +2394,7 @@ function renderTrain(){
   const t = sessionTally(w);
   h += '<div class="savebar"><div class="savein">'
     +'<button id="restchip" class="restchip" style="display:none" onclick="stopRest()"></button>'
+    +'<button id="restplus" class="restchip plus" style="display:none" onclick="restEnd+=30000;tickRest()">+30s</button>'
     +'<div class="tally num" id="sesslive"><b>'+t.sets+'/'+t.total+'</b> sets \u00B7 <b>'+(t.vol>=1000?(t.vol/1000).toFixed(1)+"k":t.vol)+'</b> lb</div>'
     +'<button class="savebtn'+(t.sets?"":" idle")+'" onclick="saveSession()">Save '+esc(w.label)+'</button>'
     +'</div></div>';
@@ -2478,7 +2497,7 @@ function liveTally(){
 function startRest(exId){
   const e = findEx(exId);
   const w = WORKOUTS[workoutId] || {};
-  const secs = (e && e.rest) || (w.tag==="PUMP" ? 75 : 120);
+  const secs = (e && e.rest) || PROG_REST || (w.tag==="PUMP" ? 75 : 120);
   restEnd = Date.now() + secs*1000;
   if (restInt) clearInterval(restInt);
   restInt = setInterval(tickRest, 500);
@@ -2489,6 +2508,8 @@ function stopRest(){
   if (restInt){ clearInterval(restInt); restInt=null; }
   const el = document.getElementById("restchip");
   if (el) el.style.display = "none";
+  const p = document.getElementById("restplus");
+  if (p) p.style.display = "none";
 }
 function tickRest(){
   const el = document.getElementById("restchip");
@@ -2498,6 +2519,8 @@ function tickRest(){
     el.textContent = "GO \u2014 next set";
     el.className = "restchip go";
     el.style.display = "";
+    const pp = document.getElementById("restplus");
+    if (pp) pp.style.display = "none";
     if (navigator.vibrate) try{ navigator.vibrate([120,60,120]); }catch(e){}
     clearInterval(restInt); restInt=null;
     setTimeout(()=>{ if (Date.now()>restEnd) stopRest(); }, 2500);
@@ -2506,6 +2529,8 @@ function tickRest(){
   el.style.display = "";
   el.className = "restchip";
   el.textContent = "REST "+Math.floor(left/60)+":"+String(left%60).padStart(2,"0")+" \u00B7 tap to skip";
+  const p = document.getElementById("restplus");
+  if (p) p.style.display = "";
 }
 function toggleNote(exId){ noteOpen = noteOpen===exId ? null : exId; render(); }
 function prefillPlan(exId){
@@ -2725,6 +2750,70 @@ function renderLiftDetail(){
   h += '</div></div>';
   return h;
 }
+// --- Strength standards (approximate strengthlevel.com-style bodyweight multiples) ---
+const STD_LIFTS = [
+  {key:"bench",    label:"Bench Press",    m:[0.50,0.75,1.25,1.75,2.00], f:[0.25,0.50,0.75,1.00,1.40],
+   match:n=>/bench press/.test(n) && !/machine|smith|incline|decline|close|dumbbell|db /.test(n)},
+  {key:"squat",    label:"Back Squat",     m:[0.75,1.25,1.50,2.25,2.75], f:[0.50,0.75,1.25,1.50,2.00],
+   match:n=>/squat/.test(n) && !/hack|goblet|front|split|bulgarian|smith|machine|jump|pistol|box/.test(n)},
+  {key:"deadlift", label:"Deadlift",       m:[1.00,1.50,2.00,2.50,3.00], f:[0.50,1.00,1.25,1.75,2.50],
+   match:n=>/deadlift/.test(n) && !/romanian|rdl|stiff|single|sumo dumbbell|db /.test(n)},
+  {key:"ohp",      label:"Overhead Press", m:[0.35,0.55,0.80,1.05,1.30], f:[0.20,0.35,0.50,0.75,1.00],
+   match:n=>/(overhead press|military press|standing press|strict press)/.test(n) && !/machine|dumbbell|db |seated/.test(n)},
+  {key:"row",      label:"Barbell Row",    m:[0.50,0.75,1.00,1.50,1.75], f:[0.35,0.50,0.75,1.00,1.20],
+   match:n=>/(barbell row|bent over row|pendlay)/.test(n) && !/machine|cable|dumbbell|db |chest|seal/.test(n)},
+];
+const STD_LEVELS = ["Untrained","Beginner","Novice","Intermediate","Advanced","Elite"];
+function latestBodyweight(){
+  if (metrics && metrics.length) return metrics[metrics.length-1].w;
+  if (whoopBody && whoopBody.weight_kg) return Math.round(whoopBody.weight_kg*2.20462*10)/10;
+  return null;
+}
+function usingFemaleStandards(){
+  const n = (programName||"").toLowerCase();
+  return n.includes("female") || n.includes("women");
+}
+function strengthPanel(){
+  const bwLb = latestBodyweight();
+  if (!bwLb) return "";
+  const fem = usingFemaleStandards();
+  const rowsOut = [];
+  for (const L of STD_LIFTS){
+    // best e1RM across all non-deload strength sessions, matched by exercise name
+    let best = 0, bestName = null;
+    sessions.filter(s=>!s.deload && !s.activity).forEach(s=>{
+      for (const [exId, sets] of Object.entries(s.entries||{})){
+        const nm = (LIBNAME[exId]||exId).toLowerCase().replace(/[-_]+/g," ");
+        if (!L.match(nm)) continue;
+        sets.forEach(x=>{ const e1 = e1rm(x.w, x.r); if (e1>best){ best=e1; bestName=LIBNAME[exId]||exId; } });
+      }
+    });
+    if (!best) continue;
+    const T = fem ? L.f : L.m;
+    const ratio = best/bwLb;
+    let lvl = 0;
+    T.forEach((t,i)=>{ if (ratio>=t) lvl=i+1; });
+    const next = lvl<5 ? T[lvl] : null;
+    const prog = next!=null
+      ? Math.max(0, Math.min(1, (ratio-(lvl?T[lvl-1]:0)) / (next-(lvl?T[lvl-1]:0))))
+      : 1;
+    rowsOut.push({label:L.label, name:bestName, e1:best, ratio, lvl, next, prog,
+      nextLb: next!=null? Math.ceil(next*bwLb/5)*5 : null});
+  }
+  if (!rowsOut.length) return "";
+  let h = '<h2 class="sect disp a">Strength standards</h2><div class="panel a">';
+  rowsOut.forEach(r=>{
+    h += '<div class="stdrow">'
+      +'<div class="stdtop"><span class="stdname">'+esc(r.label)+'</span>'
+      +'<span class="stdlvl l'+r.lvl+'">'+STD_LEVELS[r.lvl]+'</span></div>'
+      +'<div class="stdbar"><span class="stdfill" style="width:'+Math.round(r.prog*100)+'%"></span></div>'
+      +'<div class="stdmeta num">e1RM <b>'+r.e1+'</b> lb \u00B7 '+r.ratio.toFixed(2)+'\u00D7 BW'
+      +(r.nextLb?' \u00B7 '+STD_LEVELS[r.lvl+1]+' at <b>'+r.nextLb+'</b> lb':' \u00B7 top of the chart')+'</div>'
+      +'</div>';
+  });
+  h += '<p class="statline">Estimated 1RM vs '+(fem?"female":"male")+' strength standards at <b>'+bwLb+'</b> lb bodyweight. Approximate population benchmarks \u2014 barbell lifts only; machine numbers don\u2019t map to standards.</p></div>';
+  return h;
+}
 function renderProgress(){
   if (progLift) return renderLiftDetail();
   const vols = weeklyVolumes();
@@ -2772,7 +2861,8 @@ function renderProgress(){
 
   const gv = groupVolume(30);
   if (gv.length){
-    h += '<h2 class="sect disp a">Muscle groups \u2014 30 days</h2><div class="panel a">';
+    h += strengthPanel();
+  h += '<h2 class="sect disp a">Muscle groups \u2014 30 days</h2><div class="panel a">';
     const maxv = gv[0].v||1;
     gv.forEach(g=>{
       h += '<div class="gbar"><span class="gn">'+esc(g.name)+'</span><span class="gtrack"><span class="gfill" style="width:'+Math.max(4,Math.round(g.v/maxv*100))+'%"></span></span><span class="gp num">'+g.pct+'%</span></div>';

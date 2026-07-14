@@ -613,6 +613,41 @@
   .empty { color:var(--dim); font-size:13px; padding:14px 0; text-align:center; }
   svg { display:block; }
   svg text { font-family:-apple-system,system-ui,sans-serif; }
+
+  /* ============ GPT Sprint 1: Intelligent command center ============ */
+  .command { position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:26px; padding:18px; background:linear-gradient(150deg,rgba(30,30,30,.97),rgba(12,12,12,.93)); box-shadow:0 26px 80px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); }
+  .command::after { content:""; position:absolute; width:280px; height:280px; right:-145px; top:-155px; border-radius:50%; background:rgba(var(--accent-rgb),.16); filter:blur(18px); pointer-events:none; }
+  .cmdtop { position:relative; z-index:1; display:grid; grid-template-columns:minmax(0,1fr) 112px; gap:14px; align-items:center; }
+  .cmdhello { color:var(--dim); font-size:12px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+  .cmdmission { margin:5px 0 0; color:#fff; font-size:clamp(34px,9vw,52px); line-height:.94; letter-spacing:.015em; }
+  .cmdreason { margin:10px 0 0; color:#bbb7b2; font-size:13.5px; line-height:1.5; }
+  .cmdreason b { color:var(--accent-hi); }
+  .readiness { position:relative; width:108px; height:108px; display:grid; place-items:center; }
+  .readiness svg { position:absolute; inset:0; transform:rotate(-90deg); }
+  .readiness .track { fill:none; stroke:rgba(255,255,255,.07); stroke-width:9; }
+  .readiness .meter { fill:none; stroke:var(--accent-hi); stroke-width:9; stroke-linecap:round; filter:drop-shadow(0 0 7px rgba(var(--accent-rgb),.38)); transition:stroke-dashoffset .9s var(--sp); }
+  .readiness strong { display:block; color:#fff; font-family:var(--display); font-size:30px; line-height:.9; text-align:center; }
+  .readiness span { display:block; margin-top:5px; color:var(--dim); font-size:8px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; text-align:center; }
+  .cmdgrid { position:relative; z-index:1; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:16px; }
+  .cmdmetric { padding:11px 10px; border:1px solid rgba(255,255,255,.07); border-radius:15px; background:rgba(255,255,255,.025); }
+  .cmdmetric strong { display:block; color:#fff; font-family:var(--display); font-size:22px; line-height:1; }
+  .cmdmetric span { display:block; margin-top:6px; color:var(--dim); font-size:8.5px; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
+  .priorityrow { position:relative; z-index:1; display:flex; gap:7px; overflow-x:auto; margin:12px -2px 0; padding:2px; scrollbar-width:none; }
+  .priorityrow::-webkit-scrollbar { display:none; }
+  .priority { flex:none; max-width:250px; padding:8px 10px; border-radius:999px; border:1px solid var(--border); background:rgba(255,255,255,.035); color:#c9c6c1; font-size:11.5px; font-weight:750; white-space:nowrap; }
+  .priority.good { border-color:rgba(74,222,128,.3); color:var(--ok); }
+  .priority.warn { border-color:rgba(251,191,36,.3); color:var(--warn); }
+  .priority.bad { border-color:rgba(252,165,165,.3); color:var(--danger); }
+  .cmdactions { position:relative; z-index:1; display:grid; grid-template-columns:1fr auto; gap:8px; margin-top:14px; }
+  .cmdstart { min-height:54px; border:0; border-radius:17px; background:linear-gradient(135deg,var(--accent-hi),var(--accent-deep)); color:#fff; font-family:var(--display); font-size:19px; font-weight:900; letter-spacing:.07em; text-transform:uppercase; box-shadow:0 15px 34px rgba(var(--accent-rgb),.25); }
+  .cmdadapt { min-width:54px; min-height:54px; border:1px solid var(--border2); border-radius:17px; background:rgba(255,255,255,.045); color:var(--text); font-size:20px; }
+  .intelstrip { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; }
+  .intelcard { padding:13px 14px; border:1px solid var(--border); border-radius:18px; background:linear-gradient(145deg,rgba(27,27,27,.88),rgba(16,16,16,.8)); }
+  .intelcard .eyebrow { color:var(--faint); font-size:8.5px; font-weight:900; letter-spacing:.13em; text-transform:uppercase; }
+  .intelcard .headline { margin-top:6px; color:#fff; font-family:var(--display); font-size:18px; font-weight:900; text-transform:uppercase; }
+  .intelcard .detail { margin-top:5px; color:var(--dim); font-size:11px; line-height:1.4; }
+  @media (max-width:430px){ .cmdtop{grid-template-columns:minmax(0,1fr) 94px}.readiness{width:92px;height:92px}.readiness strong{font-size:27px}.cmdgrid{gap:6px}.cmdmetric{padding:10px 8px}.cmdmetric strong{font-size:20px} }
+
 </style>
 </head>
 <body>
@@ -715,7 +750,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "11.6";
+const APP_VERSION = "12.0-gpt.1";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2182,6 +2217,50 @@ function setState(row, plan, i){
   return "custom";
 }
 
+
+function intelligentState(workoutId, exs, plans, stalls, sessN, curVol, prevVol){
+  const rec = recToday();
+  const readiness = rec==null ? Math.max(45, Math.min(92, 62 + Math.min(sessN,3)*4 - stalls.length*5)) : rec;
+  const band = readiness>=67 ? "high" : readiness>=34 ? "moderate" : "low";
+  const scheduled = scheduleFor(new Date().getDay());
+  const w = WORKOUTS[workoutId];
+  const setCount = exs.reduce((n,e)=>n+(plans[e.id]&&plans[e.id].sets?plans[e.id].sets.length:e.sets||0),0);
+  const duration = Math.max(25, Math.round((setCount*2.7 + exs.length*1.4)/5)*5);
+  const ready = Object.values(plans).filter(x=>x.mode==="add").length;
+  const delta = prevVol>0 ? Math.round((curVol-prevVol)/prevVol*100) : null;
+  const priorities=[];
+  if (readiness>=67) priorities.push({tone:"good",text:"Recovery supports normal progression"});
+  else if (readiness>=34) priorities.push({tone:"warn",text:"Keep 1 rep in reserve today"});
+  else priorities.push({tone:"bad",text:"Reduce one working set per lift"});
+  if (ready) priorities.push({tone:"good",text:ready+" lift"+(ready>1?"s":"")+" ready to progress"});
+  if (stalls.length) priorities.push({tone:"warn",text:stalls[0]+" needs a new stimulus"});
+  if (!scheduled) priorities.push({tone:"",text:"Optional session — today is scheduled rest"});
+  if (delta!=null) priorities.push({tone:delta>=0?"good":"warn",text:"Volume pace "+(delta>=0?"+":"")+delta+"% week over week"});
+  const reason = readiness<34
+    ? "Recovery is suppressed. Keep the movement pattern, but lower fatigue so tomorrow is not compromised."
+    : readiness<67
+      ? "Readiness is moderate. Run the plan, avoid grinders, and let bar speed decide the final set."
+      : ready
+        ? ready+" progression"+(ready>1?"s are":" is")+" available and recovery supports pushing the programmed targets."
+        : "Recovery supports the scheduled work. Beat the last session with clean reps before adding load.";
+  return {readiness,band,scheduled,workout:w.label,duration,ready,delta,priorities,reason};
+}
+function readinessRing(score){
+  const r=43, c=2*Math.PI*r, off=c-(Math.max(0,Math.min(100,score))/100)*c;
+  return '<div class="readiness"><svg viewBox="0 0 108 108" aria-hidden="true"><circle class="track" cx="54" cy="54" r="'+r+'"></circle><circle class="meter" cx="54" cy="54" r="'+r+'" stroke-dasharray="'+c.toFixed(2)+'" stroke-dashoffset="'+off.toFixed(2)+'"></circle></svg><div><strong class="num">'+score+'</strong><span>Readiness</span></div></div>';
+}
+function adaptToday(){
+  const sc=recToday();
+  if (sc!=null && sc<34){
+    for (const e of effEx(workoutId)){
+      const p=planFor(e); const rows=rowsFor(e,p).slice(0,Math.max(1,(p.sets?p.sets.length:e.sets)-1));
+      values[e.id]=rows.map((x,i)=>({w:p.sets&&p.sets[i]?Math.round((p.sets[i].w||0)*.9/5)*5:"",r:p.sets&&p.sets[i]?p.sets[i].r:""}));
+    }
+    saveDraft(); toast("Low-recovery version loaded — one fewer set and lighter targets."); render(); return;
+  }
+  fillAll(); toast("Today’s targets loaded.");
+}
+
 function renderTrain(){
   const w = WORKOUTS[workoutId];
   const todayDow = new Date().getDay();
@@ -2243,31 +2322,33 @@ function renderTrain(){
     }
     acct += '</div>';
   }
-  // ===== Briefing card (primary) =====
-  let h = acct + '<div class="brief a">';
-  h += '<div class="kicker"><span class="pulse"></span>'+esc(dayName)+' \u00B7 '+fmtDate(new Date().toISOString())+(programName?' \u00B7 '+esc(programName):'')
-    +(todayW ? (todayW!==workoutId ? ' \u00B7 switched' : ' \u00B7 scheduled') : ' \u00B7 rest day')+'</div>';
-  h += '<div class="btitle disp">'+esc(w.label)+'</div>';
-  const dl = deloadActive();
-  if (dl){
-    h += '<p class="bcopy"><b>Deload week.</b> Loads are cut to ~50% across the board \u2014 same movements, easy effort, full recovery. Progression resumes next week. <button class="silink" onclick="skipDeload()">Skip this deload</button></p>';
-  } else if (todayW){
-    h += '<p class="bcopy">Plan is loaded. '+(readyCount
-      ? '<b>'+readyCount+' lift'+(readyCount>1?'s':'')+'</b> ready for more weight \u2014 targets are pre-set on every set below.'
-      : 'Beat your last numbers \u2014 every set below carries its target.')+'</p>';
-  } else if (!dl) {
-    h += '<p class="bcopy">Scheduled rest. Viewing <b>'+esc(w.label)+'</b> \u2014 log it if you\u2019re training anyway.</p>';
-  }
-  h += '<div class="bmetrics">'
-    +'<div class="bm"><span class="v num">'+sessN+'/'+WEEK_TARGET+'</span><span class="l">This week</span></div>'
-    +'<div class="bm"><span class="v num'+(readyCount?" hot":"")+'">'+(readyCount?"\u25B2 "+readyCount:"\u2013")+'</span><span class="l">Progressions</span></div>'
-    +'<div class="bm"><span class="v num'+(delta!==null&&delta>=0?" up":"")+'">'+(delta===null?"\u2013":(delta>=0?"+":"")+delta+"%")+'</span><span class="l">Vol pace wk/wk</span></div>'
+  // ===== Intelligent command center =====
+  const intel = intelligentState(workoutId, exs, plans, stalls, sessN, curVol, prevVol);
+  const firstName = profile && profile.display_name ? profile.display_name.split(/\s+/)[0] : "Athlete";
+  const hour = new Date().getHours();
+  const greeting = hour<12 ? "Good morning" : hour<18 ? "Good afternoon" : "Good evening";
+  let h = acct + '<div class="command a">';
+  h += '<div class="cmdtop"><div><div class="cmdhello">'+greeting+', '+esc(firstName)+'</div>'
+    +'<div class="cmdmission disp">'+esc(w.label)+'</div>'
+    +'<p class="cmdreason">'+esc(intel.reason)+'</p></div>'+readinessRing(intel.readiness)+'</div>';
+  h += '<div class="cmdgrid">'
+    +'<div class="cmdmetric"><strong class="num">'+intel.duration+'m</strong><span>Est. duration</span></div>'
+    +'<div class="cmdmetric"><strong class="num">'+sessN+'/'+WEEK_TARGET+'</strong><span>Weekly adherence</span></div>'
+    +'<div class="cmdmetric"><strong class="num">'+(intel.ready?'▲ '+intel.ready:'—')+'</strong><span>Progressions</span></div>'
     +'</div>';
-  h += '<button class="baction" onclick="fillAll()">Fill session to plan \u2192</button>';
+  h += '<div class="priorityrow">';
+  intel.priorities.slice(0,4).forEach(p=>{ h += '<span class="priority '+p.tone+'">'+esc(p.text)+'</span>'; });
+  h += '</div>';
+  h += '<div class="cmdactions"><button class="cmdstart" onclick="fillAll()">Begin session</button><button class="cmdadapt" onclick="adaptToday()" aria-label="Adapt today’s workout" title="Adapt today’s workout">⚡</button></div>';
   h += '<div class="switchrow">';
-  for (const id of Object.keys(WORKOUTS))
-    h += '<button class="'+(id===workoutId?"on":"")+'" onclick="setWorkout(\''+id+'\')">'+id+'</button>';
+  for (const id of Object.keys(WORKOUTS)) h += '<button class="'+(id===workoutId?'on':'')+'" onclick="setWorkout(\''+id+'\')">'+id+'</button>';
   h += '</div></div>';
+
+  const deltaText = intel.delta==null ? 'Not enough comparison data yet.' : 'Training volume is '+(intel.delta>=0?'up ':'down ')+Math.abs(intel.delta)+'% versus last week.';
+  h += '<div class="intelstrip a">'
+    +'<div class="intelcard"><div class="eyebrow">Training signal</div><div class="headline">'+(intel.ready?intel.ready+' loads advancing':'Build clean reps')+'</div><div class="detail">'+(intel.ready?'The progression engine found completed rep ranges ready for more load.':'No forced jump today. Earn the next increase by completing the top of the range.')+'</div></div>'
+    +'<div class="intelcard"><div class="eyebrow">Weekly trajectory</div><div class="headline">'+(intel.delta==null?'Establishing baseline':(intel.delta>=0?'Volume rising':'Volume easing'))+'</div><div class="detail">'+esc(deltaText)+'</div></div>'
+    +'</div>';
 
   // ===== Stall warnings =====
   if (stalls.length){

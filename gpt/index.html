@@ -614,6 +614,20 @@
   svg { display:block; }
   svg text { font-family:-apple-system,system-ui,sans-serif; }
 
+  /* ============ Sprint 2: live session intelligence ============ */
+  .livehud { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0; }
+  .livehud .lh { padding:11px 9px; border:1px solid var(--border); border-radius:14px; background:rgba(255,255,255,.025); text-align:center; }
+  .livehud strong { display:block; font-family:var(--display); font-size:20px; color:#fff; line-height:1; }
+  .livehud span { display:block; margin-top:5px; color:var(--faint); font-size:8px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+  .settarget { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:7px 0 0 44px; color:var(--faint); font-size:10px; font-weight:800; }
+  .settarget .hit { color:var(--ok); }
+  .settarget .near { color:var(--warn); }
+  .settarget .miss { color:var(--danger); }
+  .exprogress { height:4px; margin:12px 0 1px; border-radius:99px; background:rgba(255,255,255,.06); overflow:hidden; }
+  .exprogress span { display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,var(--accent-deep),var(--accent-hi)); transition:width .25s var(--sp); }
+  .sessioncue { margin:10px 0 0; padding:10px 12px; border-radius:13px; border:1px solid rgba(var(--accent-rgb),.25); background:rgba(var(--accent-rgb),.06); color:#cbc7c2; font-size:12px; line-height:1.45; }
+  @media (max-width:520px){ .livehud { grid-template-columns:repeat(2,1fr); } }
+
   /* ============ GPT Sprint 1: Intelligent command center ============ */
   .command { position:relative; overflow:hidden; border:1px solid rgba(255,255,255,.1); border-radius:26px; padding:18px; background:linear-gradient(150deg,rgba(30,30,30,.97),rgba(12,12,12,.93)); box-shadow:0 26px 80px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); }
   .command::after { content:""; position:absolute; width:280px; height:280px; right:-145px; top:-155px; border-radius:50%; background:rgba(var(--accent-rgb),.16); filter:blur(18px); pointer-events:none; }
@@ -1911,13 +1925,15 @@ function renderHistEdit(){
 const DRAFT_KEY = "iron-log-draft";
 const DRAFT_TTL = 12*3600*1000;
 function saveDraft(){
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), workoutId, values, subs, sessionNote, noteDrafts})); } catch(e){}
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), workoutId, values, subs, sessionNote, noteDrafts, sessionStartedAt})); } catch(e){}
 }
 function clearDraft(){ try { localStorage.removeItem(DRAFT_KEY); } catch(e){} }
 function setNoteDraft(exId, v){ noteDrafts[exId]=v; saveDraft(); }
 function setSessNote(v){ sessionNote=v; saveDraft(); }
 let sessionNote = "";
 let noteDrafts = {};
+let sessionStartedAt = 0;
+let sessionClockInt = null;
 let noteOpen = null;
 let restEnd = 0, restInt = null;
 function slotKey(presId){ return workoutId+":"+presId; }
@@ -2261,6 +2277,56 @@ function adaptToday(){
   fillAll(); toast("Today’s targets loaded.");
 }
 
+function beginSession(){
+  if (!sessionStartedAt) sessionStartedAt = Date.now();
+  fillAll();
+  saveDraft();
+  startSessionClock();
+}
+function startSessionClock(){
+  if (sessionClockInt) clearInterval(sessionClockInt);
+  sessionClockInt = setInterval(updateLiveHud, 1000);
+  updateLiveHud();
+}
+function stopSessionClock(){ if (sessionClockInt){ clearInterval(sessionClockInt); sessionClockInt=null; } }
+function elapsedMins(){ return sessionStartedAt ? Math.max(0,Math.floor((Date.now()-sessionStartedAt)/60000)) : 0; }
+function workoutProgress(){
+  const t=sessionTally(WORKOUTS[workoutId]);
+  return t.total ? Math.round(t.sets/t.total*100) : 0;
+}
+function remainingMins(){
+  const t=sessionTally(WORKOUTS[workoutId]);
+  const left=Math.max(0,t.total-t.sets);
+  const avg=WORKOUTS[workoutId].tag==='PUMP'?2.1:2.8;
+  return Math.max(0,Math.round(left*avg));
+}
+function targetStatus(e,row,si,plan){
+  if (!plan || !plan.sets || !plan.sets[si]) return '';
+  const target=plan.sets[si], reps=Number(row.r)||0, wt=Number(row.w)||0;
+  if (!reps) return 'Target '+(e.bw?'':target.w+' lb × ')+target.r;
+  const weightOK=e.bw || wt>=target.w;
+  if (weightOK && reps>=target.r) return '<span class="hit">Target met</span>';
+  if (weightOK && reps===target.r-1) return '<span class="near">1 rep short</span>';
+  return '<span class="miss">Below target</span>';
+}
+function nextSessionCue(){
+  const t=sessionTally(WORKOUTS[workoutId]);
+  if (!t.sets) return 'Load today’s targets, then log each set as you finish it.';
+  if (t.sets>=t.total) return 'Session complete. Review notes, then save the workout.';
+  const exs=effEx(workoutId);
+  for (const e of exs){
+    const p=planFor(e), rows=rowsFor(e,p);
+    const idx=rows.findIndex(r=>!(Number(r.r)>0&&(e.bw||r.w!=='')));
+    if (idx>=0) return 'Next: '+e.name+' · set '+(idx+1)+' of '+rows.length+'.';
+  }
+  return 'Keep moving through the programmed sets.';
+}
+function updateLiveHud(){
+  const ids={clock:sessionStartedAt?(elapsedMins()+'m'):'—',progress:workoutProgress()+'%',remaining:remainingMins()+'m',volume:(()=>{const v=sessionTally(WORKOUTS[workoutId]).vol;return v>=1000?(v/1000).toFixed(1)+'k':String(v)})()};
+  Object.entries(ids).forEach(([k,v])=>{const el=document.getElementById('lh_'+k);if(el)el.textContent=v;});
+  const cue=document.getElementById('sessioncue'); if(cue) cue.textContent=nextSessionCue();
+}
+
 function renderTrain(){
   const w = WORKOUTS[workoutId];
   const todayDow = new Date().getDay();
@@ -2339,7 +2405,7 @@ function renderTrain(){
   h += '<div class="priorityrow">';
   intel.priorities.slice(0,4).forEach(p=>{ h += '<span class="priority '+p.tone+'">'+esc(p.text)+'</span>'; });
   h += '</div>';
-  h += '<div class="cmdactions"><button class="cmdstart" onclick="fillAll()">Begin session</button><button class="cmdadapt" onclick="adaptToday()" aria-label="Adapt today’s workout" title="Adapt today’s workout">⚡</button></div>';
+  h += '<div class="cmdactions"><button class="cmdstart" onclick="beginSession()">Begin session</button><button class="cmdadapt" onclick="adaptToday()" aria-label="Adapt today’s workout" title="Adapt today’s workout">⚡</button></div>';
   h += '<div class="switchrow">';
   for (const id of Object.keys(WORKOUTS)) h += '<button class="'+(id===workoutId?'on':'')+'" onclick="setWorkout(\''+id+'\')">'+id+'</button>';
   h += '</div></div>';
@@ -2434,13 +2500,16 @@ function renderTrain(){
     if (plan.last) h += '<p class="lastline num">Last: '+plan.last.sets.map(s=>(e.bw? s.r : s.w+"\u00D7"+s.r)).join(", ")+' ('+fmtDate(plan.last.date)+')</p>';
     h += '</div>';
     // set rows: always open
+    const exDone = rows.filter(s=>Number(s.r)>0&&(e.bw||s.w!=="")).length;
+    h += '<div class="exprogress"><span style="width:'+(rows.length?Math.round(exDone/rows.length*100):0)+'%"></span></div>';
     h += '<div class="adjinner" style="padding-top:12px">';
     rows.forEach((row,si)=>{
       h += '<div class="setrow'+(e.bw?" bwrow":"")+(si>=e.sets?" rm":"")+'"><span class="setlbl">Set '+(si+1)+'</span>'
         + (e.bw ? '' : stepper(e.id,si,"w",row.w,5))
         + stepper(e.id,si,"r",row.r,(e.unit==="sec"?5:1),e.unit)
         + (si>=e.sets ? '<button class="rmset" onclick="removeSet(\''+e.id+'\','+si+')" aria-label="remove set '+(si+1)+'">\u2715</button>' : '')
-        +'</div>';
+        +'</div>'
+        +'<div class="settarget num"><span>'+targetStatus(e,row,si,plan)+'</span></div>';
     });
     if (!e.bw && plan.sets && rows.every(s=>s.w===""))
       h += '<button class="prefillbtn" onclick="prefillPlan(\''+e.id+'\')">Prefill '+plan.sets[0].w+' lb</button>';
@@ -2530,7 +2599,7 @@ function bump(exId,i,f,d){
   ensureRows(exId);
   const cur = Number(values[exId][i][f])||0;
   values[exId][i][f] = String(Math.max(0,cur+d));
-  if (f==="r" && cur===0 && Number(values[exId][i][f])>0) startRest(exId);
+  if (f==="r" && cur===0 && Number(values[exId][i][f])>0){ if(!sessionStartedAt){sessionStartedAt=Date.now();startSessionClock();} startRest(exId); }
   saveDraft();
   const inp = document.getElementById(exId+"_"+i+"_"+f);
   if (inp) inp.value = values[exId][i][f];
@@ -2540,7 +2609,7 @@ function typed(exId,i,f,v){
   ensureRows(exId);
   const prev = Number(values[exId][i][f])||0;
   values[exId][i][f] = /^\d*\.?\d*$/.test(v) ? v : "";
-  if (f==="r" && prev===0 && Number(values[exId][i][f])>0) startRest(exId);
+  if (f==="r" && prev===0 && Number(values[exId][i][f])>0){ if(!sessionStartedAt){sessionStartedAt=Date.now();startSessionClock();} startRest(exId); }
   saveDraft();
   liveTally(); refreshCard(exId);
 }
@@ -2555,6 +2624,7 @@ function liveTally(){
   const el = document.getElementById("sesslive"); if (!el) return;
   const t = sessionTally(WORKOUTS[workoutId]);
   el.innerHTML = "<b>"+t.sets+"/"+t.total+"</b> sets \u00B7 <b>"+(t.vol>=1000?(t.vol/1000).toFixed(1)+"k":t.vol)+"</b> lb";
+  updateLiveHud();
 }
 function startRest(exId){
   const e = findEx(exId);
@@ -2651,7 +2721,7 @@ function saveSession(){
   for (const k of Object.keys(noteDrafts)) if (noteDrafts[k] && noteDrafts[k].trim() && entries[k]) exN[k]=noteDrafts[k].trim();
   if (Object.keys(exN).length) sess.exNotes = exN;
   sessions.push(sess);
-  persist(); values={}; adjustOpen=null; subs={}; pickerFor=null; sessionNote=""; noteDrafts={}; noteOpen=null; stopRest(); clearDraft();
+  persist(); values={}; sessionStartedAt=0; stopSessionClock(); adjustOpen=null; subs={}; pickerFor=null; sessionNote=""; noteDrafts={}; noteOpen=null; stopRest(); clearDraft();
   if (prs.length) toast("PR \u2014 "+prs[0]+(prs.length>1?" +"+(prs.length-1)+" more":""), "pr");
   else toast("Saved \u2014 "+logged+" lifts logged.");
   render();
@@ -3079,13 +3149,13 @@ try {
   const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
   if (d && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
     if (d.workoutId && WORKOUTS[d.workoutId]) workoutId = d.workoutId;
-    values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{};
+    values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{}; sessionStartedAt = Number(d.sessionStartedAt)||0;
     draftRestored = true;
   } else if (d) clearDraft();
 } catch(e){}
 applyThemeAttr();
 render();
-if (draftRestored) setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400);
+if (draftRestored){ if(sessionStartedAt) startSessionClock(); setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400); }
 bootBackend();
 
 </script>

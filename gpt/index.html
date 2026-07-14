@@ -662,6 +662,20 @@
   .intelcard .detail { margin-top:5px; color:var(--dim); font-size:11px; line-height:1.4; }
   @media (max-width:430px){ .cmdtop{grid-template-columns:minmax(0,1fr) 94px}.readiness{width:92px;height:92px}.readiness strong{font-size:27px}.cmdgrid{gap:6px}.cmdmetric{padding:10px 8px}.cmdmetric strong{font-size:20px} }
 
+
+  /* ============ Sprint 3: predictive progression ============ */
+  .predgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px}
+  .pred{padding:10px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025)}
+  .pred b{display:block;color:#fff;font-family:var(--display);font-size:19px;line-height:1}
+  .pred span{display:block;margin-top:5px;color:var(--faint);font-size:8.5px;font-weight:900;letter-spacing:.09em;text-transform:uppercase}
+  .prchance{margin-top:9px;padding:9px 10px;border-radius:12px;border:1px solid rgba(var(--accent-rgb),.25);background:rgba(var(--accent-rgb),.055);color:var(--dim);font-size:11.5px;line-height:1.4}
+  .prchance strong{color:var(--accent-hi)}
+  .forecast{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .forecastbar{flex:1;height:6px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden}
+  .forecastbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent-deep),var(--accent-hi))}
+  .forecastpct{flex:none;color:var(--text);font-size:11px;font-weight:900}
+  @media(max-width:390px){.predgrid{grid-template-columns:1fr 1fr}.predgrid .pred:last-child{grid-column:1/-1}}
+
 </style>
 </head>
 <body>
@@ -764,7 +778,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "12.0-gpt.1";
+const APP_VERSION = "12.0-gpt.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2030,6 +2044,50 @@ function planFor(e){
   return {mode:"beat", last, topW,
     sets:Array.from({length:n},(_,i)=>({w:e.bw?0:topW, r: last.sets[i] ? Math.min(last.sets[i].r+1, e.max) : e.min}))};
 }
+function estimated1RM(weight,reps){
+  weight=Number(weight)||0; reps=Number(reps)||0;
+  if (!weight || !reps) return 0;
+  if (reps===1) return weight;
+  return Math.round(weight*(1+reps/30));
+}
+function bestE1RM(sets){
+  return Math.max(0,...(sets||[]).map(s=>estimated1RM(s.w,s.r)));
+}
+function exerciseForecast(e,plan){
+  const hist=historyFor(e.id,6);
+  if (!hist.length) return {confidence:48,trend:0,current:0,target:0,prChance:18,label:"Building baseline"};
+  const chronological=[...hist].reverse();
+  const vals=chronological.map(x=>bestE1RM(x.sets));
+  const current=vals[vals.length-1]||0;
+  const prior=vals.length>1?vals[vals.length-2]:current;
+  const trend=prior?Math.round((current-prior)/prior*100):0;
+  let consistency=0;
+  if (vals.length>2){
+    let positive=0; for(let i=1;i<vals.length;i++) if(vals[i]>=vals[i-1]) positive++;
+    consistency=positive/(vals.length-1);
+  }
+  let confidence=Math.round(54+Math.min(24,hist.length*4)+consistency*14);
+  if(isStalled(e.id)) confidence-=14;
+  const rec=recToday(); if(rec!=null){ if(rec>=67) confidence+=5; else if(rec<34) confidence-=12; else confidence-=3; }
+  confidence=Math.max(20,Math.min(96,confidence));
+  let target=current;
+  if(plan&&plan.sets&&plan.sets.length){ target=Math.max(...plan.sets.map(s=>estimated1RM(s.w,s.r))); }
+  let prChance=Math.round(28+Math.max(0,trend)*5+consistency*25);
+  if(plan&&plan.mode==="add") prChance+=24;
+  if(plan&&plan.mode==="beat") prChance+=10;
+  if(isStalled(e.id)) prChance-=18;
+  if(rec!=null){ if(rec>=67)prChance+=8; else if(rec<34)prChance-=20; }
+  prChance=Math.max(5,Math.min(92,prChance));
+  const label=trend>=3?"Strength rising":trend<=-3?"Strength easing":isStalled(e.id)?"Plateau watch":"Holding steady";
+  return {confidence,trend,current,target,prChance,label};
+}
+function forecastCopy(e,f,plan){
+  if(!f.current) return "Complete two or three sessions to establish a reliable strength forecast.";
+  if(plan.mode==="add") return "You cleared the rep range. Today is a legitimate progression opportunity.";
+  if(f.prChance>=70) return "High probability of a rep or estimated-strength PR if execution stays clean.";
+  if(isStalled(e.id)) return "A PR is less likely today. Prioritize cleaner reps, longer rest, or one additional set.";
+  return "The best next win is beating your prior rep total without sacrificing technique.";
+}
 function isStalled(exId){
   const h = historyFor(exId, 3);
   if (h.length < 3) return false;
@@ -2498,6 +2556,14 @@ function renderTrain(){
     if (noteOpen===e.id)
       h += '<input class="exnoteinput" placeholder="Note \u2014 e.g. knee tweaked on set 2" value="'+esc(noteDrafts[e.id]||"")+'" onchange="setNoteDraft(\''+e.id+'\',this.value)">';
     if (plan.last) h += '<p class="lastline num">Last: '+plan.last.sets.map(s=>(e.bw? s.r : s.w+"\u00D7"+s.r)).join(", ")+' ('+fmtDate(plan.last.date)+')</p>';
+    const fc = exerciseForecast(e, plan);
+    h += '<div class="predgrid">'
+      +'<div class="pred"><b class="num">'+(fc.current||'—')+'</b><span>Est. 1RM</span></div>'
+      +'<div class="pred"><b class="num">'+(fc.trend>0?'+':'')+fc.trend+'%</b><span>Recent trend</span></div>'
+      +'<div class="pred"><b class="num">'+fc.confidence+'%</b><span>Forecast confidence</span></div>'
+      +'</div>'
+      +'<div class="prchance"><strong>'+fc.prChance+'% PR opportunity</strong> · '+esc(forecastCopy(e,fc,plan))
+      +'<div class="forecast"><span class="forecastbar"><i style="width:'+fc.prChance+'%"></i></span><span class="forecastpct num">'+fc.prChance+'%</span></div></div>';
     h += '</div>';
     // set rows: always open
     const exDone = rows.filter(s=>Number(s.r)>0&&(e.bw||s.w!=="")).length;
@@ -2709,7 +2775,10 @@ function saveSession(){
       const prev = lastEntryFor(e.id);
       const prevTop = prev ? Math.max(...prev.sets.map(s=>s.w)) : 0;
       const newTop = Math.max(...clean.map(s=>s.w));
+      const prevEst = prev ? bestE1RM(prev.sets) : 0;
+      const newEst = bestE1RM(clean);
       if (!isDl && prev && newTop > prevTop) prs.push(e.name+" "+newTop+" lb");
+      else if (!isDl && prev && newEst > prevEst) prs.push(e.name+" est. 1RM "+newEst+" lb");
       entries[e.id]=clean; logged++;
     }
   }

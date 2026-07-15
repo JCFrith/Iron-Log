@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Iron Log</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{background:#0b0b0b;color:#888;font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0}</style>
+</head>
+<body>
+<p>Opening Iron Log&hellip;</p>
+<script>
+  // Catch auth redirects (and any stray visits) at the domain root and
+  // forward to the app, preserving the token fragment untouched.
+  location.replace("/Iron-Log/" + location.search + location.hash);
+</script>
+</body>
+</html>

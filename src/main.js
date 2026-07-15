@@ -8,4 +8,4 @@ const navigation = [
   ['dashboard', 'Command'],
   ['workout', 'Workout'],
   ['analytics', 'Analytics'],
-  ['body', 'Body'],
+  ['body',

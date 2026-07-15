@@ -88,18 +88,22 @@
     color:var(--dim); font-size:clamp(11px,3vw,12.5px); font-weight:800; white-space:nowrap; background:rgba(23,23,23,.7);
   }
   .weekbadge b { color:var(--text); }
-  .tabs { display:flex; margin-top:12px; } .tabs button { flex:1; }
+  .tabs { display:flex; gap:22px; margin-top:12px; } .tabs button {
+    background:none; border:0; border-bottom:2px solid transparent; color:var(--faint);
+    font-family:"Rubik Wide","Rubik",sans-serif; font-weight:900; font-size:12.5px; letter-spacing:.16em;
+    padding:11px 0 12px; text-transform:uppercase; transition:color .25s;
+  }
   .tabs button {
     min-height:44px; border:0; border-bottom:2px solid transparent; background:transparent;
     color:var(--faint); font-family:var(--display); font-size:16px; font-weight:900;
     letter-spacing:.09em; text-transform:uppercase; transition:color .2s, border-color .2s;
   }
-  .tabs button.on { color:var(--text); border-bottom-color:var(--accent); }
+  .tabs button.on { color:var(--text); border-bottom-color:var(--accent); text-shadow:0 0 18px rgba(var(--accent-rgb),.45); }
 
   main { width:min(760px,100%); margin:0 auto; padding:16px 16px 0; }
   h2.sect {
-    display:flex; align-items:center; gap:10px; margin:22px 0 10px;
-    color:var(--dim); font-size:13px; letter-spacing:.1em;
+    display:flex; align-items:center; gap:10px; margin:26px 0 11px;
+    color:var(--dim); font-size:14.5px; letter-spacing:.12em;
   }
   h2.sect::after { content:""; height:1px; flex:1; background:linear-gradient(90deg,rgba(255,255,255,.12),transparent); }
 
@@ -112,7 +116,7 @@
   .brief::after { content:""; position:absolute; width:230px; height:230px; right:-100px; top:-135px; border-radius:50%; background:rgba(var(--accent-rgb),.13); filter:blur(10px); pointer-events:none; }
   .kicker { display:flex; align-items:center; gap:8px; color:#f7a06f; font-size:10px; font-weight:900; letter-spacing:.18em; text-transform:uppercase; }
   .pulse { width:7px; height:7px; border-radius:50%; background:var(--accent); animation:pulse 2.2s ease-in-out infinite; }
-  .btitle { margin:11px 0 0; font-size:clamp(36px,10.5vw,54px); line-height:.95; letter-spacing:.02em; color:#fff; }
+  .btitle { margin:11px 0 0; font-size:clamp(40px,11.5vw,62px); line-height:.92; letter-spacing:.015em; color:#fff; }
   .bcopy { margin:10px 0 0; max-width:560px; color:#b7b4b0; font-size:14px; line-height:1.5; }
   .bcopy b { color:var(--accent-hi); font-weight:700; }
   .bmetrics { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:18px; }
@@ -780,7 +784,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "12.1";
+const APP_VERSION = "12.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3045,11 +3049,13 @@ function renderProgress(){
   const prev = recent.length>1?recent[recent.length-2].value:0;
   const delta = prev>0 ? Math.round((cur-prev)/prev*100) : null;
 
-  let h = whoopPanel(whoopDays, "Recovery", sessions);
-  h += sleepPanel(whoopDays);
-  h += strainPanel(whoopDays);
-  h += workoutsPanel(whoopAllWorkouts);
-  h += bodyPanelWhoop();
+  // Recovery block floats to the top on rough days; on green days training analytics lead.
+  const whoopBlock = whoopPanel(whoopDays, "Recovery", sessions)
+    + sleepPanel(whoopDays) + strainPanel(whoopDays)
+    + workoutsPanel(whoopAllWorkouts) + bodyPanelWhoop();
+  const recNow = recToday();
+  const greenDay = recNow!=null && recNow>=67;
+  let h = greenDay ? "" : whoopBlock;
   h += '<h2 class="sect disp a">Body</h2><div class="panel a">';
   {
     const cur = metrics.length ? metrics[metrics.length-1] : null;
@@ -3100,6 +3106,7 @@ function renderProgress(){
     h += '</div></div>';
   }
 
+  if (greenDay) h += whoopBlock;
   h += '<h2 class="sect disp a">Weekly volume</h2>';
   h += '<div class="panel a"><div class="volhead"><span class="vh disp num">'+(cur>=1000?(cur/1000).toFixed(1)+"k":cur)+' lb</span>'
     +(delta!==null?'<span class="delta num '+(delta>=0?"up":"down")+'">'+(delta>=0?"\u2191 +":"\u2193 ")+delta+'% wk/wk</span>':'')

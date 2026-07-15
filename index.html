@@ -784,7 +784,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "12.3";
+const APP_VERSION = "12.4";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -1896,7 +1896,6 @@ let progressEx = "leg-press";
 let adjustOpen = null;
 let subs = {};       // slotKey -> substitute lift name (per session)
 let pickerFor = null; // prescribed exercise id whose picker is open
-let progLift = null;  // lift detail open in Progress
 let histEdit = null;  // session id being edited
 let tlOpen = null;     // expanded timeline session id
 let histDraft = null; // working copy of entries
@@ -2232,7 +2231,7 @@ function findEx(exId){
 
 // ================= Render =================
 function setTab(t){
-  tab=t; adjustOpen=null; if (t!=="coach") coachView=null; if (t!=="progress") progLift=null;
+  tab=t; adjustOpen=null; if (t!=="coach") coachView=null;
   ["train","progress","coach"].forEach(x=>{
     const b=document.getElementById("tab-"+x);
     if (b) b.className = (x===t?"on":"");
@@ -2839,7 +2838,12 @@ function allExercises(){
       if (!m.has(id)) m.set(id, LIBNAME[id] || id.replace(/-/g," "));
   return [...m.entries()].map(([id,name])=>({id,name}));
 }
-function setProgressEx(v){ progressEx=v; render(); }
+function setProgressEx(v){
+  progressEx=v;
+  const y = (typeof window.scrollY==="number" ? window.scrollY : (document.documentElement ? document.documentElement.scrollTop : 0)) || 0;
+  render();
+  requestAnimationFrame(()=>{ if (typeof window.scrollTo==="function") window.scrollTo(0, y); });
+}
 
 function smoothPath(pts){
   if (pts.length<2) return "";
@@ -2940,23 +2944,24 @@ function statCell(label, val, delta){
   return '<div class="bm"><span class="v num">'+val+(delta!==null&&delta!==undefined?' <span class="mini '+(delta>=0?"up":"down")+'">'+(delta>=0?"\u2191":"\u2193")+Math.abs(delta)+'%</span>':'')+'</span><span class="l">'+label+'</span></div>';
 }
 function pctDelta(c,p){ return p>0 ? Math.round((c-p)/p*100) : null; }
-function renderLiftDetail(){
-  const e = findEx(progLift) || {id:progLift, name:exDisplayName(progLift), bw:false};
-  const rows = liftAnalytics(progLift);
-  let h = '<button class="silink" onclick="progLift=null;render()">\u2190 All lifts</button>';
-  h += '<h2 class="sect disp a">'+esc(e.name)+'</h2>';
+function liftDetailPanel(){
+  const exId = progressEx;
+  const e = findEx(exId) || {id:exId, name:exDisplayName(exId), bw:false};
+  const rows = liftAnalytics(exId);
+  let h = '';
   const bw = rows.length && rows.every(r=>r.topW===0);
   // chart: top-set weight (or best reps for bw)
   const chart = rows.map(r=>({label:fmtDate(r.date), value: bw? r.bestR : r.topW}));
   const e1s = rows.filter(r=>r.e1).map(r=>r.e1);
   const curE1 = e1s.length?e1s[e1s.length-1]:null;
   const prevE1 = e1s.length>1?e1s[e1s.length-2]:null;
-  h += '<div class="panel a"><div class="volhead"><span class="vh disp num">'+(rows.length? (bw? rows[rows.length-1].bestR+(" reps") : rows[rows.length-1].topW+" lb") : "\u2013")+'</span>'
+  h += '<div class="panel a"><div class="volhead"><span class="vh disp" style="font-size:17px">'+esc(e.name)+'</span>'
+    +'<span class="vh disp num" style="margin-left:auto">'+(rows.length? (bw? rows[rows.length-1].bestR+(" reps") : rows[rows.length-1].topW+" lb") : "\u2013")+'</span>'
     +(curE1?'<span class="delta num '+(prevE1&&curE1<prevE1?"down":"up")+'">e1RM '+curE1+(prevE1?(curE1>=prevE1?' \u2191':' \u2193'):'')+'</span>':'')
     +'</div>'+svgLine(chart.slice(-16), bw?{}:{unit:" lb"})
     +'<p class="statline">'+(bw?'Best reps per session':'Top set per session')+(curE1?' \u00B7 e1RM (Epley) from best set, deloads excluded':'')+'</p></div>';
   // PR history for this lift
-  const prs = prLog().filter(p=>p.id===progLift).reverse();
+  const prs = prLog().filter(p=>p.id===exId).reverse();
   if (prs.length){
     h += '<h2 class="sect disp a">PR history</h2><div class="panel a"><div class="trendrows">';
     prs.slice(0,8).forEach(p=>{ h += '<div class="trow"><span class="d">'+fmtDate(p.date)+'</span><span class="s num">'+p.w+'\u00D7'+p.r+' \u00B7 e1RM '+e1rm(p.w,p.r)+'</span></div>'; });
@@ -3042,7 +3047,7 @@ function workoutTimeLine(){
   return '<p class="statline">Typical session length: <b>'+bits.join("</b> \u00B7 <b>")+'</b> \u2014 plan your gym window around it.</p>';
 }
 function renderProgress(){
-  if (progLift) return renderLiftDetail();
+
   const vols = weeklyVolumes();
   const recent = vols.slice(-10);
   const cur = recent.length?recent[recent.length-1].value:0;
@@ -3127,27 +3132,14 @@ function renderProgress(){
   if (cards.length){
     h += '<h2 class="sect disp a">Lifts \u2014 tap to explore</h2><div class="sparkrow">';
     cards.forEach((c,i)=>{
-      h += '<button class="spark a'+(c.id===progressEx?" on":"")+'" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="progLift=\''+c.id+'\';render()">'
+      h += '<button class="spark a'+(c.id===progressEx?" on":"")+'" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="setProgressEx(\''+c.id+'\')">'
         +'<div class="sn">'+esc(c.name)+'</div><div class="sv num">'+c.latest+'</div>'
         +'<div class="sd num '+(c.d>0?"up":"flat")+'">'+(c.d>0?"\u2191 +"+c.d+" lb":c.d<0?"\u2193 "+c.d+" lb":"\u2192 holding")+'</div>'
         +sparkSvg(c.vals)+'</button>';
     });
     h += '</div>';
-    const sel = findEx(progressEx);
-    const hist=[];
-    for (const s of sessions){
-      const sets = s.entries && s.entries[progressEx];
-      if (sets && sets.length) hist.push({label:fmtDate(s.date), value:Math.max(...sets.map(x=>x.w)), raw:sets});
-    }
-    h += '<div class="panel a"><div class="volhead"><span class="vh disp" style="font-size:17px">'+esc(sel?sel.name:"")+'</span></div>'+svgLine(hist.slice(-12));
-    if (hist.length){
-      h += '<div class="trendrows">';
-      hist.slice(-5).reverse().forEach(r=>{
-        h += '<div class="trow"><span class="d">'+esc(r.label)+'</span><span class="s num">'+r.raw.map(s=>s.w+"\u00D7"+s.r).join("&nbsp;&nbsp;")+'</span></div>';
-      });
-      h += '</div>';
-    }
-    h += '</div>';
+    if (!findEx(progressEx) && cards.length) progressEx = cards[0].id;
+    h += liftDetailPanel();
   } else {
     h += '<div class="panel a"><p class="empty">Log your first session \u2014 every lift gets its own trend card here.</p></div>';
   }

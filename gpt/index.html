@@ -778,7 +778,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "12.0-gpt.3";
+const APP_VERSION = "12.0-gpt.4";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2556,14 +2556,6 @@ function renderTrain(){
     if (noteOpen===e.id)
       h += '<input class="exnoteinput" placeholder="Note \u2014 e.g. knee tweaked on set 2" value="'+esc(noteDrafts[e.id]||"")+'" onchange="setNoteDraft(\''+e.id+'\',this.value)">';
     if (plan.last) h += '<p class="lastline num">Last: '+plan.last.sets.map(s=>(e.bw? s.r : s.w+"\u00D7"+s.r)).join(", ")+' ('+fmtDate(plan.last.date)+')</p>';
-    const fc = exerciseForecast(e, plan);
-    h += '<div class="predgrid">'
-      +'<div class="pred"><b class="num">'+(fc.current||'—')+'</b><span>Est. 1RM</span></div>'
-      +'<div class="pred"><b class="num">'+(fc.trend>0?'+':'')+fc.trend+'%</b><span>Recent trend</span></div>'
-      +'<div class="pred"><b class="num">'+fc.confidence+'%</b><span>Forecast confidence</span></div>'
-      +'</div>'
-      +'<div class="prchance"><strong>'+fc.prChance+'% PR opportunity</strong> · '+esc(forecastCopy(e,fc,plan))
-      +'<div class="forecast"><span class="forecastbar"><i style="width:'+fc.prChance+'%"></i></span><span class="forecastpct num">'+fc.prChance+'%</span></div></div>';
     h += '</div>';
     // set rows: always open
     const exDone = rows.filter(s=>Number(s.r)>0&&(e.bw||s.w!=="")).length;
@@ -2920,6 +2912,16 @@ function renderLiftDetail(){
   const rows = liftAnalytics(progLift);
   let h = '<button class="silink" onclick="progLift=null;render()">\u2190 All lifts</button>';
   h += '<h2 class="sect disp a">'+esc(e.name)+'</h2>';
+  const detailPlan = planFor(e);
+  const fc = exerciseForecast(e, detailPlan);
+  h += '<div class="panel a"><div class="menusect">Performance forecast</div>'
+    +'<div class="predgrid">'
+    +'<div class="pred"><b class="num">'+(fc.current||'—')+'</b><span>Est. 1RM</span></div>'
+    +'<div class="pred"><b class="num">'+(fc.trend>0?'+':'')+fc.trend+'%</b><span>Recent trend</span></div>'
+    +'<div class="pred"><b class="num">'+fc.confidence+'%</b><span>Forecast confidence</span></div>'
+    +'</div>'
+    +'<div class="prchance"><strong>'+fc.prChance+'% PR opportunity</strong> · '+esc(forecastCopy(e,fc,detailPlan))
+    +'<div class="forecast"><span class="forecastbar"><i style="width:'+fc.prChance+'%"></i></span><span class="forecastpct num">'+fc.prChance+'%</span></div></div></div>';
   const bw = rows.length && rows.every(r=>r.topW===0);
   // chart: top-set weight (or best reps for bw)
   const chart = rows.map(r=>({label:fmtDate(r.date), value: bw? r.bestR : r.topW}));

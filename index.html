@@ -511,6 +511,17 @@
   .coachrec { margin:6px 0 0; font-size:12.5px; font-weight:700; line-height:1.5; }
   .coachrec.bad { color:var(--danger); }
   .coachrec.warn { color:var(--warn); }
+  .fbkinds { display:flex; gap:9px; margin:4px 0 10px; }
+  .fbk { flex:1; min-height:44px; border-radius:12px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--dim); font-weight:800; font-size:13.5px; }
+  .fbk.on { border-color:rgba(var(--accent-rgb),.5); background:rgba(var(--accent-rgb),.12); color:var(--text); }
+  .fbtext { min-height:110px; }
+  .fbcount { font-size:11px; font-weight:900; background:var(--accent); color:#fff; border-radius:99px; padding:2px 8px; margin-left:6px; }
+  .fbrow { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:11px 0; border-top:1px solid var(--border); }
+  .fbrow:first-child { border-top:0; padding-top:2px; }
+  .fbmain { min-width:0; }
+  .fbwho { font-weight:900; font-size:13.5px; margin-right:7px; }
+  .fbage { color:var(--faint); font-size:11.5px; margin-left:7px; }
+  .fbbody { margin:5px 0 0; color:var(--dim); font-size:13px; line-height:1.5; }
   .tl { }
   .tlrow { display:flex; gap:11px; }
   .tlrail { display:flex; flex-direction:column; align-items:center; width:14px; flex:none; }
@@ -783,7 +794,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "12.5";
+const APP_VERSION = "12.7";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -884,7 +895,7 @@ async function signIn(){
 async function signOut(){
   try { await sb("/auth/v1/logout", {method:"POST"}); } catch(e){}
   auth=null; profile=null; programName=""; netState="local";
-  localOnly=false; try{ localStorage.removeItem("iron-log-local-ok"); }catch(e){}
+  localOnly=false; try{ localStorage.removeItem("iron-log-local-ok"); localStorage.removeItem(BOOT_CACHE); }catch(e){}
   saveAuth();
   applyProgram(null);
   toast("Signed out \u2014 this device keeps its local log.");
@@ -928,6 +939,7 @@ async function loadProgram(){
   if (!r.ok){ applyProgram(null); return; }
   const rows = await r.json();
   if (rows.length && rows[0].data && rows[0].data.workouts){
+    window.__progRaw = rows[0].data;
     applyProgram(rows[0].data);
     programName = rows[0].name;
   } else applyProgram(null);
@@ -1020,14 +1032,16 @@ async function dismissWhoopWorkout(id){
 async function loadWhoop(){
   if (!auth) return;
   try {
-    const r = await sb("/rest/v1/whoop_recovery?select=*&user_id=eq."+auth.uid);
+    const [r, d, aw, bb] = await Promise.all([
+      sb("/rest/v1/whoop_recovery?select=*&user_id=eq."+auth.uid),
+      sb("/rest/v1/whoop_days?select=*&user_id=eq."+auth.uid+"&order=day.asc"),
+      sb("/rest/v1/whoop_workouts?select=*&user_id=eq."+auth.uid+"&order=start_at.desc&limit=20"),
+      sb("/rest/v1/whoop_body?select=*&user_id=eq."+auth.uid),
+    ]);
     if (r.ok){ const rows = await r.json(); whoopRec = rows[0] || null; }
-    const d = await sb("/rest/v1/whoop_days?select=*&user_id=eq."+auth.uid+"&order=day.asc");
     if (d.ok) whoopDays = await d.json();
-    const aw = await sb("/rest/v1/whoop_workouts?select=*&user_id=eq."+auth.uid+"&order=start_at.desc&limit=20");
     if (aw.ok) whoopAllWorkouts = await aw.json();
-    const bb = await sb("/rest/v1/whoop_body?select=*&user_id=eq."+auth.uid);
-    if (bb.ok){ const r = await bb.json(); whoopBody = r[0]||null; }
+    if (bb.ok){ const rows = await bb.json(); whoopBody = rows[0]||null; }
   } catch(e){}
 }
 function avgOf(rows, f, n){
@@ -1557,6 +1571,15 @@ function trendMark(cur, prev){
   if (cr<pr) return '<span class="tr dn">\u25BC</span>';
   return '<span class="tr flat">\u2013</span>';
 }
+let coachFeedback = [];
+async function resolveFeedback(id){
+  try {
+    const r = await sb("/rest/v1/feedback?id=eq."+encodeURIComponent(id), { method:"PATCH", body:{ resolved:true } });
+    if (!r.ok) throw 0;
+    const f = coachFeedback.find(x=>x.id===id); if (f) f.resolved = true;
+    render();
+  } catch(e){ toast("Couldn\u2019t resolve \u2014 try again."); }
+}
 let coachWhoopSynced = false;
 async function loadCoach(){
   if (!coachWhoopSynced && auth){
@@ -1564,19 +1587,21 @@ async function loadCoach(){
     fetch(WHOOP_FN, { method:"POST", headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"sync", all:true}) }).catch(()=>{});
   }
-  const [pr, lr, gr, nr, wr, dr] = await Promise.all([
+  const [pr, lr, gr, nr, wr, dr, fr] = await Promise.all([
     sb("/rest/v1/profiles?select=user_id,display_name,program_id"),
     sb("/rest/v1/logs?select=user_id,data,updated_at"),
     sb("/rest/v1/programs?select=id,name"),
     sb("/rest/v1/coach_notes?select=athlete,session_id,body,created_at&order=created_at.desc&limit=400"),
     sb("/rest/v1/whoop_recovery?select=user_id,recovery_score,sleep_hours,updated_at"),
     sb("/rest/v1/whoop_days?select=*&order=day.asc"),
+    sb("/rest/v1/feedback?select=*&order=created_at.desc&limit=60"),
   ]);
   if (!pr.ok || !lr.ok || !gr.ok) throw 0;
   const profs = await pr.json(), logs = await lr.json(), progs = await gr.json();
   const allNotes = nr.ok ? await nr.json() : [];
   const allRec = wr.ok ? await wr.json() : [];
   const allDays = dr.ok ? await dr.json() : [];
+  coachFeedback = fr.ok ? await fr.json() : [];
   const logMap = {}; logs.forEach(l=>{ logMap[l.user_id]=l; });
   coachData = { athletes: profs.map(p=>{
       const l = logMap[p.user_id];
@@ -1618,13 +1643,15 @@ function coachTab(){ setTab("coach"); }
 async function afterAuth(){
   netState="syncing"; updateNetBadge();
   try {
-    await ensureProfile();
-    await loadProgram();
-    const added = await pullMergePush();
+    const [ , added ] = await Promise.all([
+      ensureProfile().then(()=>loadProgram()),   // dependent pair
+      pullMergePush(),
+      loadMyCoachNotes(),
+      loadWhoop(),
+      loadWhoopWorkouts(),
+    ]);
     if (tagLegacySessions()) pushLog();
-    await loadMyCoachNotes();
-    await loadWhoop();
-    await loadWhoopWorkouts();
+    saveBootCache();
     if (whoopRec && Date.now()-new Date(whoopRec.updated_at).getTime() > 3*3600000) whoopSync(true);
     try {
       const q = new URLSearchParams(location.search);
@@ -1729,6 +1756,7 @@ function renderTut(){
   h += T("Plate calculator", "The barbell icon on each lift opens the calculator preloaded with your entered weight, a warm-up ramp to your work sets, and the exact plates drawn to scale. Uncheck the bar for plate-loaded machines \u2014 it switches to total plates.");
   h += T("Body & activity", "Log bodyweight (and waist) in Progress \u2014 the 30-day trend next to your training volume is the real scoreboard. Yoga, cardio, and walks log via <b>+ Log an activity</b> and count toward your weekly target.");
   h += T("Fixing mistakes", "Tap \u270E on any session in Progress \u2192 Activity to correct weights and reps, or delete it entirely. Fat-fingered a 900 lb leg press? Gone, and your PRs recalculate.");
+  h += T("Found a bug?", "\u2630 menu \u2192 <b>Report a bug / suggest a feature</b>. It lands in your coach\u2019s inbox on the Coach tab \u2014 screenshots aren\u2019t supported yet, so describe what you saw.");
   h += T("WHOOP", "Connect WHOOP from this menu and your morning recovery, HRV, and sleep appear on the Session tab. Green (67%+): train as planned. Red (under 34%): the app suggests easing off \u2014 your call, or your coach\u2019s.");
   h += T("WHOOP workouts", "Cardio, yoga, or sport recorded on WHOOP shows up on your Session tab under \u201CFrom WHOOP\u201D \u2014 tap <b>Log it</b> to count it toward your week, or \u2715 to ignore. Lifting sessions you log in Iron Log already count; don\u2019t double-log them.");
   h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
@@ -1762,6 +1790,33 @@ function plateCalc(target, inclBar){
   const out=[];
   for (const p of PLATES){ const n=Math.floor(load/p+1e-9); if(n>0){ out.push({p,n}); load=+(load-n*p).toFixed(2); } }
   return {plates:out, rem:load};
+}
+let fbOpen = false, fbKind = "bug", fbBody = "";
+function toggleFeedback(){ fbOpen = !fbOpen; if (fbOpen) menuOpen = false; render(); }
+async function sendFeedback(){
+  const body = fbBody.trim();
+  if (!auth){ toast("Sign in to send feedback."); return; }
+  if (body.length < 3){ toast("Add a little detail first."); return; }
+  try {
+    const r = await sb("/rest/v1/feedback", { method:"POST", body:{ user_id: auth.uid, kind: fbKind, body: body } });
+    if (!r.ok) throw 0;
+    fbBody = ""; fbOpen = false;
+    toast("Sent \u2014 your coach will see it.");
+    render();
+  } catch(e){ toast("Couldn\u2019t send \u2014 try again."); }
+}
+function renderFeedback(){
+  let h = '<div class="sheetback" onclick="toggleFeedback()"></div>';
+  h += '<div class="sheet" role="dialog" aria-label="feedback">';
+  h += '<div class="sheethead"><span class="sheettitle disp">Bug or idea?</span><span class="sheetsub">Goes straight to your coach</span></div>';
+  h += '<div class="fbkinds">'
+    +'<button class="fbk'+(fbKind==="bug"?" on":"")+'" onclick="fbKind=\'bug\';render()">\uD83D\uDC1B Bug</button>'
+    +'<button class="fbk'+(fbKind==="idea"?" on":"")+'" onclick="fbKind=\'idea\';render()">\uD83D\uDCA1 Suggestion</button>'
+    +'</div>';
+  h += '<textarea class="sessnote fbtext" placeholder="'+(fbKind==="bug"?"What broke, and what were you doing when it did?":"What would make Iron Log better?")+'" onchange="fbBody=this.value" oninput="fbBody=this.value">'+esc(fbBody)+'</textarea>';
+  h += '<button class="baction" onclick="sendFeedback()">Send</button>';
+  h += '</div>';
+  return h;
 }
 function renderPlates(){
   let h = '<div class="sheetback" onclick="togglePlates()"></div>';
@@ -1836,6 +1891,7 @@ function renderMenu(){
     ? '<button class="menuitem" onclick="whoopResync()">Re-sync WHOOP now</button>'
       +'<button class="menuitem" onclick="whoopDisconnect()">WHOOP connected \u2713 \u2014 disconnect</button>'
     : '<button class="menuitem" onclick="whoopConnect()">Connect WHOOP</button>');
+  h += '<button class="menuitem" onclick="toggleFeedback()">Report a bug / suggest a feature</button>';
   h += '<a class="menuitem menulink" href="privacy.html">Privacy policy</a>';
   h += '<button class="menuitem" onclick="togglePlates()">Plate calculator</button>';
   if (auth) h += '<button class="menuout" onclick="menuOpen=false;signOut()">Sign out</button>';
@@ -1853,10 +1909,42 @@ function skipSignIn(){
   try { localStorage.setItem("iron-log-local-ok","1"); } catch(e){}
   render();
 }
+const BOOT_CACHE = "iron-log-boot";
+function saveBootCache(){
+  if (!auth) return;
+  try {
+    localStorage.setItem(BOOT_CACHE, JSON.stringify({
+      uid: auth.uid,
+      profile, programName,
+      program: window.__progRaw || null,
+      whoopRec, whoopDays, whoopAllWorkouts, whoopBody,
+      myCoachNotes,
+    }));
+  } catch(e){}
+}
+function hydrateBootCache(){
+  try {
+    const c = JSON.parse(localStorage.getItem(BOOT_CACHE) || "null");
+    if (!c || !auth || c.uid !== auth.uid) return false;
+    profile = c.profile || profile;
+    if (c.program){ window.__progRaw = c.program; applyProgram(c.program); }
+    programName = c.programName || programName;
+    whoopRec = c.whoopRec || null;
+    whoopDays = c.whoopDays || [];
+    whoopAllWorkouts = c.whoopAllWorkouts || [];
+    whoopBody = c.whoopBody || null;
+    myCoachNotes = c.myCoachNotes || [];
+    if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
+    return true;
+  } catch(e){ return false; }
+}
 async function bootBackend(){
   loadAuth();
   parseAuthHash();
   if (!auth) { updateNetBadge(); return; }
+  // paint the returning user's app instantly from the last snapshot;
+  // the network pass below refreshes everything silently
+  if (hydrateBootCache()) render();
   if (auth.exp - 60 < Math.floor(Date.now()/1000)){
     const ok = await refreshAuth();
     if (!ok){ setTimeout(()=>toast("Session expired \u2014 sign in again to sync."), 600); render(); return; }
@@ -2257,7 +2345,7 @@ function render(){
   lastTabRendered = tab;
   m.innerHTML = ((!auth && !localOnly) ? renderWelcome()
     : tab==="train" ? renderTrain() : tab==="coach" ? renderCoach() : renderProgress())
-    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "")
+    + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "") + (fbOpen ? renderFeedback() : "")
     + (histEdit ? renderHistEdit() : "") + (actOpen ? renderActivity() : "");
   if (tab==="progress") setTimeout(animateArea, 30);
 }
@@ -3277,7 +3365,24 @@ function renderCoach(){
   if (!coachData) return '<div class="panel a"><p class="empty">Loading roster\u2026</p></div>';
   if (progEdit) return renderProgEdit();
   if (coachView) return renderAthleteDetail();
-  let h = '<h2 class="sect disp a">Roster \u2014 '+coachData.athletes.length+' athlete'+(coachData.athletes.length===1?'':'s')+'</h2>';
+  let h = "";
+  {
+    const open = coachFeedback.filter(f=>!f.resolved);
+    if (open.length){
+      h += '<h2 class="sect disp a">Inbox <span class="fbcount num">'+open.length+'</span></h2><div class="panel a">';
+      open.slice(0,12).forEach(f=>{
+        const who = coachData.athletes.find(a=>a.user_id===f.user_id) || null;
+        h += '<div class="fbrow"><div class="fbmain">'
+          +'<span class="fbwho">'+esc(who?who.name:"Unknown")+'</span>'
+          +'<span class="tlbadge '+(f.kind==="bug"?"dl":"act")+'">'+(f.kind==="bug"?"BUG":"IDEA")+'</span>'
+          +'<span class="fbage num">'+fmtDate(f.created_at)+'</span>'
+          +'<p class="fbbody">'+esc(f.body)+'</p></div>'
+          +'<button class="abtn" onclick="resolveFeedback(\''+f.id+'\')">Resolve</button></div>';
+      });
+      h += '</div>';
+    }
+  }
+  h += '<h2 class="sect disp a">Roster \u2014 '+coachData.athletes.length+' athlete'+(coachData.athletes.length===1?'':'s')+'</h2>';
   [...coachData.athletes].sort((x,y)=>athleteFlags(y).length-athleteFlags(x).length).forEach((a,i)=>{
     const flags = athleteFlags(a);
     h += '<div class="panel a coachcard" style="animation-delay:'+(Math.min(i,8)*22)+'ms" onclick="openAthlete(\''+a.uid+'\')">';

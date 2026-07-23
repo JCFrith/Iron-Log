@@ -612,7 +612,7 @@
   .restchip.plus { margin-left:0; }
   .sleepbars { margin:12px 0 6px; }
   .sbrow { display:flex; align-items:center; gap:9px; margin-bottom:7px; }
-  .sbday { flex:none; width:32px; color:var(--faint); font-size:11px; font-weight:900; letter-spacing:.04em; }
+  .sbday { flex:none; width:40px; color:var(--faint); font-size:11px; font-weight:900; letter-spacing:.04em; }
   .sbtrack { position:relative; flex:1; height:16px; border-radius:8px; background:rgba(255,255,255,.05); overflow:visible; }
   .sbfill { display:block; height:100%; border-radius:8px; transition:width .3s var(--sp); }
   .sbneed { position:absolute; top:-3px; width:2px; height:22px; background:rgba(255,255,255,.35); border-radius:1px; }
@@ -2048,7 +2048,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "14.1";
+const APP_VERSION = "14.2";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2409,7 +2409,7 @@ function sleepPanel(rows){
   const wk = rows.slice(-7).filter(r=>r.sleep_hours!=null);
   if (wk.length){
     const maxH = Math.max(...wk.map(r=>Math.max(r.sleep_hours, r.sleep_need_hours||0)), 8);
-    const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    const MD = d => (d.getMonth()+1)+"/"+d.getDate();
     h += '<div class="sleepbars">';
     wk.forEach(r=>{
       const need = r.sleep_need_hours || 8;
@@ -2418,7 +2418,7 @@ function sleepPanel(rows){
       const d = new Date(r.day+"T12:00:00");
       const needX = Math.min(100, (need/maxH)*100);
       h += '<div class="sbrow">'
-        +'<span class="sbday">'+DOW[d.getDay()]+'</span>'
+        +'<span class="sbday num">'+MD(d)+'</span>'
         +'<span class="sbtrack">'
           +'<span class="sbfill" style="width:'+Math.min(100,(r.sleep_hours/maxH)*100)+'%;background:'+col+'"></span>'
           +'<span class="sbneed" style="left:'+needX+'%" title="need"></span>'
@@ -3152,6 +3152,7 @@ function renderMenu(){
     ? '<button class="menuitem" onclick="whoopResync()">Re-sync WHOOP now</button>'
       +'<button class="menuitem" onclick="whoopDisconnect()">WHOOP connected \u2713 \u2014 disconnect</button>'
     : '<button class="menuitem" onclick="whoopConnect()">Connect WHOOP</button>');
+  h += '<button class="menuitem" onclick="clearEnteredConfirm()">Clear entered numbers</button>';
   h += '<button class="menuitem" onclick="toggleRpe()">Log RPE per set <span class="mstate">'+(rpeOn?"ON":"OFF")+'</span></button>';
   h += '<button class="menuitem" onclick="toggleFeedback()">Report a bug / suggest a feature</button>';
   h += '<a class="menuitem menulink" href="privacy.html">Privacy policy</a>';
@@ -3325,6 +3326,13 @@ function renderHistEdit(){
   return h;
 }
 const DRAFT_KEY = "iron-log-draft";
+// Local calendar day key. Entered lift numbers survive save and workout switching;
+// they clear only when the calendar day rolls over or the user clears explicitly.
+function dayKey(d){
+  const x = d || new Date();
+  return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0");
+}
+let draftDay = dayKey();
 let wkStart = 0;           // workout timer start (ms epoch); persists via draft
 let wkTimerInt = null;
 function beginWorkout(){
@@ -3348,9 +3356,30 @@ function avgWorkoutMins(wid){
 }
 const DRAFT_TTL = 12*3600*1000;
 function saveDraft(){
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), workoutId, values, subs, sessionNote, noteDrafts, wkStart})); } catch(e){}
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), day:draftDay, workoutId, values, subs, sessionNote, noteDrafts, wkStart})); } catch(e){}
 }
 function clearDraft(){ try { localStorage.removeItem(DRAFT_KEY); } catch(e){} }
+function clearEntered(silent){
+  values={}; subs={}; sessionNote=""; noteDrafts={};
+  adjustOpen=null; pickerFor=null; noteOpen=null;
+  wkStart=0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
+  stopRest(); clearDraft(); draftDay = dayKey();
+  if (!silent) toast("Entered numbers cleared.");
+  render();
+}
+function clearEnteredConfirm(){
+  const n = Object.keys(values).filter(k=>(values[k]||[]).some(r=>r && (r.w!=="" || r.r!==""))).length;
+  if (n && !confirm("Clear the numbers you've entered? This does not touch saved sessions.")) return;
+  menuOpen=false; clearEntered();
+}
+// If the app sits open past midnight, entered numbers belong to yesterday \u2014 drop them.
+function maybeRollover(){
+  const t = dayKey();
+  if (draftDay === t) return false;
+  draftDay = t;
+  if (Object.keys(values).length){ clearEntered(true); return true; }
+  clearDraft(); return false;
+}
 function setNoteDraft(exId, v){ noteDrafts[exId]=v; saveDraft(); }
 function setSessNote(v){ sessionNote=v; saveDraft(); }
 let sessionNote = "";
@@ -3735,7 +3764,7 @@ function setTab(t){
   }
   render();
 }
-function setWorkout(id){ workoutId=id; values={}; adjustOpen=null; subs={}; pickerFor=null; saveDraft(); render(); }
+function setWorkout(id){ workoutId=id; adjustOpen=null; pickerFor=null; saveDraft(); render(); }
 
 function updateWeekBadge(){
   const k = weekKey(new Date().toISOString());
@@ -3744,6 +3773,7 @@ function updateWeekBadge(){
   if (el) el.innerHTML = "<b>"+n+"/"+WEEK_TARGET+"</b> this week";
 }
 function render(){
+  if (typeof draftDay!=="undefined" && draftDay !== dayKey()){ maybeRollover(); }
   updateWeekBadge();
   const m = document.getElementById("main");
   m.classList.toggle("noanim", lastTabRendered===tab);
@@ -4324,6 +4354,12 @@ function fillAll(){
 
 function saveSession(){
   const w = WORKOUTS[workoutId];
+  // Entered numbers persist after saving, so a second press would duplicate the session.
+  // Confirm instead of blocking \u2014 two real sessions in one day is legitimate.
+  {
+    const dup = sessions.some(s=>!s.activity && s.workout===workoutId && sameProg(s) && dayKey(new Date(s.date))===dayKey());
+    if (dup && !confirm("You already logged "+workoutId+" today. Save another session with these numbers?")) return;
+  }
   const entries = {}; let logged=0; const prs=[];
   const isDl = deloadActive();
   // all-time best weight per lift BEFORE this session (excludes deloads), for genuine-PR detection
@@ -4362,7 +4398,8 @@ function saveSession(){
   for (const k of Object.keys(noteDrafts)) if (noteDrafts[k] && noteDrafts[k].trim() && entries[k]) exN[k]=noteDrafts[k].trim();
   if (Object.keys(exN).length) sess.exNotes = exN;
   sessions.push(sess);
-  persist(); values={}; adjustOpen=null; subs={}; pickerFor=null; sessionNote=""; noteDrafts={}; noteOpen=null; stopRest(); clearDraft();
+  // Numbers stay on screen after saving \u2014 they clear on day rollover or an explicit clear.
+  persist(); adjustOpen=null; pickerFor=null; noteOpen=null; stopRest(); saveDraft();
   wkStart = 0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
   render();
   pushLog();
@@ -4662,6 +4699,26 @@ function strengthPanel(){
   h += '<p class="statline">Estimated 1RM vs '+(fem?"female":"male")+' strength standards at <b>'+bwLb+'</b> lb bodyweight. Approximate population benchmarks \u2014 barbell lifts only; machine numbers don\u2019t map to standards.</p></div>';
   return h;
 }
+// Total logged training time for the current calendar year. Reported in hours only \u2014
+// never rolled up into days \u2014 and resets automatically on Jan 1.
+function ytdTrainingTime(){
+  const yr = new Date().getFullYear();
+  let mins = 0, n = 0;
+  for (const s of sessions){
+    const d = new Date(s.date);
+    if (d.getFullYear() !== yr) continue;
+    const m = s.activity ? Number(s.activity.mins)||0 : Number(s.mins)||0;
+    if (m > 0){ mins += m; n++; }
+  }
+  return {yr, mins, n, hours: mins/60};
+}
+function ytdTimeLine(){
+  const t = ytdTrainingTime();
+  if (!t.mins) return "";
+  const h = Math.floor(t.mins/60), m = t.mins%60;
+  return '<p class="statline">Total training time in '+t.yr+': <b class="num">'+h+'h'+(m?' '+m+'m':'')+'</b>'
+    + ' \u00B7 across <b class="num">'+t.n+'</b> timed session'+(t.n===1?'':'s')+'.</p>';
+}
 function workoutTimeLine(){
   const ids = Object.keys(WORKOUTS);
   const bits = [];
@@ -4714,7 +4771,7 @@ function renderProgress(){
   h += '<div class="heat">';
   weeks.forEach(w=>{ const lvl = w.n>=WEEK_TARGET?3:w.n>=Math.ceil(WEEK_TARGET/2)?2:w.n>0?1:0;
     h += '<span class="hb h'+lvl+'" title="'+w.key+': '+w.n+'"></span>'; });
-  h += '</div><p class="statline">12-week consistency \u00B7 vs prior 30 days</p>'+workoutTimeLine()+'</div>';
+  h += '</div><p class="statline">12-week consistency \u00B7 vs prior 30 days</p>'+ytdTimeLine()+workoutTimeLine()+'</div>';
 
   const gv = groupVolume(30);
   if (gv.length){
@@ -4987,9 +5044,11 @@ function importData(input){
 let draftRestored = false;
 try {
   const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
-  if (d && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
+  if (d && d.day && d.day !== dayKey()) clearDraft();
+  else if (d && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
     if (d.workoutId && WORKOUTS[d.workoutId]) workoutId = d.workoutId;
     values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{};
+    if (d.day) draftDay = d.day;
     if (d.wkStart && Date.now()-d.wkStart < DRAFT_TTL){ wkStart = d.wkStart; startWkTick(); }
     draftRestored = true;
   } else if (d) clearDraft();

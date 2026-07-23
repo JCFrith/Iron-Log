@@ -1907,6 +1907,16 @@
   .muterow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); }
   .mutename { font-size:13px; font-weight:800; }
 
+  .radarwrap { margin:2px 0 14px; }
+  .radar { display:block; width:100%; max-width:340px; margin:0 auto; overflow:visible; }
+  .rgrid { fill:none; stroke:rgba(255,255,255,.07); stroke-width:1; }
+  .rgrid.outer { stroke:rgba(255,255,255,.16); }
+  .raxis { stroke:rgba(255,255,255,.09); stroke-width:1; }
+  .rfill { fill:rgba(var(--accent-rgb),.22); stroke:var(--accent-hi); stroke-width:2; stroke-linejoin:round; }
+  .rdot { fill:var(--accent-hi); }
+  .rlbl { fill:var(--dim); font-size:11px; font-weight:900; letter-spacing:.04em; }
+  .rsub { fill:var(--faint); font-size:9px; font-weight:800; letter-spacing:.05em; }
+
   /* ============ Mobile ergonomics (authoritative — must stay last) ============ */
   /* Apple HIG minimum touch target is 44px. Buttons keep their visual size;
      an invisible centered pseudo-element expands the tappable area so nothing reflows. */
@@ -2038,7 +2048,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "14.0";
+const APP_VERSION = "14.1";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -4565,6 +4575,42 @@ const STD_LIFTS = [
    match:n=>/(barbell row|bent over row|pendlay)/.test(n) && !/machine|cable|dumbbell|db |chest|seal/.test(n)},
 ];
 const STD_LEVELS = ["Untrained","Beginner","Novice","Intermediate","Advanced","Elite"];
+const STD_SHORT = {"Bench Press":"Bench","Back Squat":"Squat","Deadlift":"Deadlift","Overhead Press":"OHP","Barbell Row":"Row"};
+// Radar of the SAME standards data the bars below show. Radial position = how far up the
+// tier ladder that lift sits (0 = Untrained, full radius = Elite), so the SHAPE reveals
+// imbalance at a glance. Needs >=3 lifts with history or a polygon is meaningless.
+function strengthRadar(rows){
+  if (!rows || rows.length < 3) return "";
+  const n = rows.length, cx = 170, cy = 152, R = 84;
+  const pt = (i,frac)=>{
+    const a = (-Math.PI/2) + (i*2*Math.PI/n);
+    return [cx + Math.cos(a)*R*frac, cy + Math.sin(a)*R*frac];
+  };
+  const poly = frac => Array.from({length:n},(_,i)=>pt(i,frac).map(v=>v.toFixed(1)).join(",")).join(" ");
+  // tier score: lvl + progress toward next, capped at 5 (Elite)
+  const scores = rows.map(r=>Math.min(5, r.lvl + (r.lvl<5 ? r.prog : 0)));
+  let s = '<svg class="radar" viewBox="0 0 340 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Strength standards by lift">';
+  for (let k=1;k<=5;k++) s += '<polygon class="rgrid'+(k===5?" outer":"")+'" points="'+poly(k/5)+'"/>';
+  for (let i=0;i<n;i++){ const p=pt(i,1); s += '<line class="raxis" x1="'+cx+'" y1="'+cy+'" x2="'+p[0].toFixed(1)+'" y2="'+p[1].toFixed(1)+'"/>'; }
+  s += '<polygon class="rfill" points="'+scores.map((sc,i)=>pt(i,Math.max(0.05,sc/5)).map(v=>v.toFixed(1)).join(",")).join(" ")+'"/>';
+  scores.forEach((sc,i)=>{ const p=pt(i,Math.max(0.05,sc/5)); s += '<circle class="rdot" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3.2"/>'; });
+  rows.forEach((r,i)=>{
+    const a = (-Math.PI/2) + (i*2*Math.PI/n);
+    const lx = cx + Math.cos(a)*(R+21), ly = cy + Math.sin(a)*(R+21), c = Math.cos(a);
+    const anch = c>0.15 ? "start" : c<-0.15 ? "end" : "middle";
+    s += '<text class="rlbl" x="'+lx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="'+anch+'">'+esc(STD_SHORT[r.label]||r.label)+'</text>'
+      +  '<text class="rsub" x="'+lx.toFixed(1)+'" y="'+(ly+11).toFixed(1)+'" text-anchor="'+anch+'">'+STD_LEVELS[r.lvl]+'</text>';
+  });
+  s += '</svg>';
+  // one actionable read, gated on a real gap
+  const lvls = rows.map(r=>r.lvl), mx = Math.max(...lvls), mn = Math.min(...lvls);
+  let read = "";
+  if (mx - mn >= 2){
+    const weak = rows[lvls.indexOf(mn)];
+    read = '<p class="statline warnline"><b>'+esc(weak.label)+'</b> is the lag \u2014 '+(mx-mn)+' tiers behind your strongest lift.</p>';
+  }
+  return '<div class="radarwrap">'+s+'</div>'+read;
+}
 function latestBodyweight(){
   if (metrics && metrics.length) return metrics[metrics.length-1].w;
   if (whoopBody && whoopBody.weight_kg) return Math.round(whoopBody.weight_kg*2.20462*10)/10;
@@ -4603,6 +4649,7 @@ function strengthPanel(){
   }
   if (!rowsOut.length) return "";
   let h = '<h2 class="sect disp a">Strength standards</h2><div class="panel a">';
+  h += strengthRadar(rowsOut);
   rowsOut.forEach(r=>{
     h += '<div class="stdrow">'
       +'<div class="stdtop"><span class="stdname">'+esc(r.label)+'</span>'

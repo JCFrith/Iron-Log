@@ -2048,7 +2048,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "14.2";
+const APP_VERSION = "14.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -4008,19 +4008,6 @@ function renderTrain(){
     h += '<p class="bcopy">Scheduled rest. Viewing <b>'+esc(w.label)+'</b> \u2014 log it if you\u2019re training anyway.</p>';
   }
   h += insightsBlock();
-  {
-    const DW = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-    const today = new Date().getDay();
-    let ss = '<div class="schedstrip">';
-    for (let d=0; d<7; d++){
-      const k = scheduleFor(d);
-      ss += '<button class="daychip'+(d===today?' today':'')+(k?'':' rest')+'"'
-        +(k?' onclick="setWorkout(\''+k+'\')"':' disabled')
-        +'><span class="dw">'+DW[d]+'</span><span class="dk">'+(k?esc(k):'\u00B7')+'</span></button>';
-    }
-    ss += '</div>';
-    h += ss;
-  }
   h += '<div class="bmetrics">'
     +'<div class="bm"><span class="v num">'+sessN+'/'+WEEK_TARGET+'</span><span class="l">This week</span></div>'
     +'<div class="bm"><span class="v num'+(readyCount?" hot":"")+'">'+(readyCount?"\u25B2 "+readyCount:"\u2013")+'</span><span class="l">Progressions</span></div>'

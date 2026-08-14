@@ -2048,7 +2048,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "14.3";
+const APP_VERSION = "14.4";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -5032,7 +5032,9 @@ let draftRestored = false;
 try {
   const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
   if (d && d.day && d.day !== dayKey()) clearDraft();
-  else if (d && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
+  else if (d && d.day===dayKey() && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
+    // only restore the selected workout when the draft is from TODAY, so yesterday's
+    // pick never overrides today's scheduled workout
     if (d.workoutId && WORKOUTS[d.workoutId]) workoutId = d.workoutId;
     values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{};
     if (d.day) draftDay = d.day;

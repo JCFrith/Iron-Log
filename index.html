@@ -1194,6 +1194,9 @@
     box-shadow:0 11px 24px rgba(var(--accent-rgb),.12),inset 0 0 0 1px rgba(var(--accent-rgb),.13),inset 0 1px 0 rgba(255,255,255,.09);
   }
   .day.today .wk { color:#fff; text-shadow:0 0 14px rgba(var(--accent-rgb),.42); }
+  .day.sel { border-color:var(--accent-hi); box-shadow:0 0 0 2px var(--accent-hi),0 11px 26px rgba(var(--accent-rgb),.28); }
+  .day.sel .dow { color:var(--accent-hi); }
+  .day.sel .wk { color:#fff; }
   .day:active { transform:scale(.91); }
   @media (hover:hover) and (pointer:fine) {
     .day:not(.rest):hover { transform:translate3d(0,-3px,0); border-color:rgba(var(--accent-rgb),.34); }
@@ -2025,10 +2028,15 @@ function applyProgram(p){
   // Snap to today's scheduled workout for THIS program's schedule. The boot-time pick
   // (line ~3422) used the builtin schedule and may be stale; recompute unless a same-day
   // draft explicitly selected a workout (handled in restoreDraft, which runs after this).
-  const sameDayDraft = (typeof draftWorkout!=="undefined" && draftWorkout && typeof draftDay!=="undefined" && draftDay===dayKey());
+  // Today's scheduled workout is authoritative at program load. Only an in-session draft
+  // with ACTUAL LOGGED VALUES (someone mid-workout) overrides it — an empty/stale draft
+  // must never pin the wrong day. (A deliberate mid-session switch persists its own values.)
+  const activeSession = (typeof draftWorkout!=="undefined" && draftWorkout && WORKOUTS[draftWorkout]
+                         && typeof draftDay!=="undefined" && draftDay===dayKey()
+                         && typeof values!=="undefined" && values && Object.keys(values).length>0);
   const sched = scheduleFor(new Date().getDay());
-  if (sameDayDraft && WORKOUTS[draftWorkout]) workoutId = draftWorkout;       // user's manual same-day pick wins
-  else if (sched && WORKOUTS[sched]) workoutId = sched;                        // else today's scheduled workout
+  if (activeSession) workoutId = draftWorkout;                                  // mid-workout with real sets — keep it
+  else if (sched && WORKOUTS[sched]) workoutId = sched;                         // otherwise TODAY's scheduled workout wins
   else if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
 }
 const BUILTIN_WORKOUTS = {
@@ -2918,6 +2926,7 @@ async function afterAuth(){
     ]);
     if (tagLegacySessions()) pushLog();
     saveBootCache();
+    render();  // fresh server program may correct the workout the stale boot-cache painted
     if (whoopRec && Date.now()-new Date(whoopRec.updated_at).getTime() > 3*3600000) whoopSync(true);
     try {
       const q = new URLSearchParams(location.search);
@@ -3179,7 +3188,7 @@ function skipSignIn(){
   try { localStorage.setItem("iron-log-local-ok","1"); } catch(e){}
   render();
 }
-const BOOT_CACHE = "iron-log-boot";
+const BOOT_CACHE = "iron-log-boot-v2";  // v2: drops pre-14.5 caches holding stale schedules
 function saveBootCache(){
   if (!auth) return;
   try {
@@ -4028,10 +4037,7 @@ function renderTrain(){
   } else {
     h += '<div class="wkrunning"><span class="pulse"></span>Workout running \u00B7 <b class="num" id="wktimer">0:00</b></div>';
   }
-  h += '<div class="switchrow">';
-  for (const id of Object.keys(WORKOUTS))
-    h += '<button class="'+(id===workoutId?"on":"")+'" onclick="setWorkout(\''+id+'\')">'+id+'</button>';
-  h += '</div></div>';
+  h += '</div>';  // (workout pill row removed — the weekday strip below is the single switcher)
 
   // ===== Stall warnings =====
   if (stalls.length){
@@ -4073,9 +4079,15 @@ function renderTrain(){
   }
   h += '<h2 class="sect disp a">Week</h2><div class="sched a">';
   const days = [["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
+  // find which day to mark as "selected": prefer today if it matches the active workout,
+  // otherwise the first day mapping to the active workout (so a manual switch is visible)
+  let selDow = -1;
+  if (scheduleFor(todayDow)===workoutId) selDow = todayDow;
+  else { for (const [,dw] of days){ if (scheduleFor(dw)===workoutId){ selDow = dw; break; } } }
   for (const [nm,dow] of days){
     const wk = scheduleFor(dow);
-    const cls = "day"+(dow===todayDow?" today":"")+(wk?"":" rest");
+    const isSel = wk && dow===selDow;
+    const cls = "day"+(dow===todayDow?" today":"")+(isSel?" sel":"")+(wk?"":" rest");
     h += '<div class="'+cls+'"'+(wk?' onclick="setWorkout(\''+wk+'\')" role="button" tabindex="0"':'')+'>'
       +(Array.isArray(SCHEDULE[dow])&&wk?'<span class="alt">ALT</span>':'')
       +'<span class="dow">'+nm+'</span><span class="wk">'+(wk||'\u2013')+'</span></div>';

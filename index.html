@@ -2004,6 +2004,7 @@ const BUILTIN_SCHEDULE = {1:"A",2:"C",3:"B",4:"C",5:["A","B"],6:null,0:null};
 let WORKOUTS, SCHEDULE;
 let PROG_REST = 0;
 function applyProgram(p){
+  _planCache = Object.create(null); _planStamp = null; _pfCache = Object.create(null); _pfStamp = null;   // program data changed \u2014 plans must recompute
   if (!p || !p.workouts){
     WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; PROG_REST = 0; programName = "";
     if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
@@ -2063,7 +2064,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "14.5";
+const APP_VERSION = "14.6";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2224,13 +2225,13 @@ async function pullMergePush(){
   (Array.isArray(cloudData.deloadSkips)?cloudData.deloadSkips:[]).forEach(k=>{ if(!deloadSkips.includes(k)) deloadSkips.push(k); });
   (Array.isArray(cloudData.deleted)?cloudData.deleted:[]).forEach(id=>{ if(!deletedIds.includes(id)) deletedIds.push(id); });
   (Array.isArray(cloudData.deletedMetrics)?cloudData.deletedMetrics:[]).forEach(id=>{ if(!deletedMetricIds.includes(id)) deletedMetricIds.push(id); });
-  sessions = sessions.filter(s=>!deletedIds.includes(s.id));
+  sessions = sessions.filter(s=>!deletedIds.includes(s.id)); bumpSessions();
   const byId = new Map(sessions.map(s=>[s.id,s]));
   let added=0;
   cloud.forEach(s=>{
     if (deletedIds.includes(s.id)) return;
     const mine = byId.get(s.id);
-    if (!mine){ sessions.push(s); byId.set(s.id,s); added++; }
+    if (!mine){ sessions.push(s); byId.set(s.id,s); added++; bumpSessions(); }
     else if ((s.rev||0) > (mine.rev||0)){ Object.assign(mine, s); added++; }
   });
   sessions.sort((a,b)=>a.id-b.id);
@@ -2284,7 +2285,7 @@ async function importWhoopWorkout(id){
   const w = whoopWorkouts.find(x=>x.id===id);
   if (!w) return;
   const mins = w.end_at ? Math.round((new Date(w.end_at)-new Date(w.start_at))/60000) : 0;
-  sessions.push({id:Date.now(), date:w.start_at, workout:"ACT",
+  bumpSessions(); sessions.push({id:Date.now(), date:w.start_at, workout:"ACT",
     activity:{name:w.sport||"Workout", mins}, entries:{}, prog:curProg(), whoop_id:w.id});
   persist(); pushLog();
   try { await sb("/rest/v1/whoop_workouts?id=eq."+encodeURIComponent(id), { method:"PATCH", body:{ imported:true } }); } catch(e){}
@@ -3262,6 +3263,8 @@ function migrateIds(){
   return changed;
 }
 let sessions = [];
+let sessionsRev = 0;                     // bumped on EVERY sessions mutation (incl. in-place edits)
+function bumpSessions(){ sessionsRev++; }
 let deloadSkips = [];
 let stallMutes = [];
 const RPE_KEY = "iron-log-rpe";
@@ -3314,7 +3317,7 @@ function saveHistEdit(){
     if (keep.length) cleaned[id] = keep;
   }
   if (!Object.keys(cleaned).length){ toast("Every set is empty \u2014 use Delete instead."); return; }
-  s.entries = cleaned;
+  s.entries = cleaned; bumpSessions();  // in-place history edit
   s.rev = (s.rev||0)+1;
   histEdit = null; histDraft = null;
   persist(); pushLog(); toast("Session updated.");
@@ -3372,10 +3375,27 @@ function avgWorkoutMins(wid){
   return Math.round(timed.reduce((a,s)=>a+s.mins,0)/timed.length);
 }
 const DRAFT_TTL = 12*3600*1000;
-function saveDraft(){
+// §5: draft writes are debounced off the tap path. State lives in memory (values/subs/...)
+// and flushes to localStorage after a short quiet period, and immediately when the page
+// hides — so nothing is lost on background/close. clearDraft cancels any pending write
+// so a queued flush can never resurrect a cleared draft.
+let _draftTimer = null;
+function _flushDraft(){
+  _draftTimer = null;
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), day:draftDay, workoutId, values, subs, sessionNote, noteDrafts, wkStart})); } catch(e){}
 }
-function clearDraft(){ try { localStorage.removeItem(DRAFT_KEY); } catch(e){} }
+function saveDraft(){
+  if (_draftTimer) clearTimeout(_draftTimer);
+  _draftTimer = setTimeout(_flushDraft, 200);
+}
+function clearDraft(){
+  if (_draftTimer){ clearTimeout(_draftTimer); _draftTimer = null; }
+  try { localStorage.removeItem(DRAFT_KEY); } catch(e){}
+}
+try {
+  document.addEventListener("visibilitychange", ()=>{ if (document.hidden && _draftTimer){ clearTimeout(_draftTimer); _flushDraft(); } });
+  window.addEventListener("pagehide", ()=>{ if (_draftTimer){ clearTimeout(_draftTimer); _flushDraft(); } });
+} catch(e){}
 function clearEntered(silent){
   values={}; subs={}; sessionNote=""; noteDrafts={};
   adjustOpen=null; pickerFor=null; noteOpen=null;
@@ -3420,6 +3440,7 @@ function effEx(wid){
   });
 }
 let lastTabRendered = null;
+let _planCache = Object.create(null), _planStamp = null;   // §1 per-workout plan/stall cache
 function persist(){ try { localStorage.setItem(KEY, JSON.stringify({sessions, deloadSkips, stallMutes, metrics, deleted:deletedIds.slice(-300), deletedMetrics:deletedMetricIds.slice(-300)})); } catch(e){ toast("Storage failed \u2014 device may be full."); } }
 
 // ================= Schedule =================
@@ -3445,12 +3466,20 @@ function sameProg(s){ return (s.prog === undefined) || s.prog === curProg(); }
 function tagLegacySessions(){
   let changed = false;
   for (const s of sessions) if (s.prog === undefined){ s.prog = curProg(); changed = true; }
-  if (changed) persist();
+  if (changed){ bumpSessions(); persist(); }
   return changed;
 }
 // ================= Intelligence =================
 const fmtDate = iso => new Date(iso).toLocaleDateString(undefined,{month:"short",day:"numeric"});
-function weekKey(iso){ const d=new Date(iso); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
+let _wkCache = Object.create(null), _wkCacheN = 0;
+function weekKey(iso){
+  const hit = _wkCache[iso]; if (hit) return hit;
+  const d=new Date(iso); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0);
+  const k=d.toISOString().slice(0,10);
+  if (_wkCacheN > 4000){ _wkCache = Object.create(null); _wkCacheN = 0; }  // cap: now()-ISO strings are unique
+  _wkCache[iso]=k; _wkCacheN++;
+  return k;
+}
 function lastEntryFor(exId){
   for (let i=sessions.length-1;i>=0;i--){
     if (!sameProg(sessions[i])) continue;
@@ -3470,7 +3499,13 @@ function historyFor(exId, n){
 }
 // planFor: the AI's computed session — per-set targets
 function round5(x){ return Math.max(5, Math.round(x/5)*5); }
+let _dlVal=null, _dlKey=null;
 function deloadActive(){
+  const _k = sessionsRev+"|"+deloadSkips.length+"|"+DELOAD_EVERY+"|"+weekKey(new Date().toISOString());
+  if (_dlKey===_k) return _dlVal;
+  _dlKey=_k; _dlVal=_deloadActiveRaw(); return _dlVal;
+}
+function _deloadActiveRaw(){
   if (!DELOAD_EVERY) return false;
   const wks = [...new Set(sessions.filter(s=>!s.activity).map(s=>weekKey(s.date)))].sort();
   const resets = sessions.filter(s=>s.deload).map(s=>weekKey(s.date)).concat(deloadSkips).sort();
@@ -3486,7 +3521,17 @@ function skipDeload(){
   toast("Deload skipped \u2014 counter reset from this week.");
   render();
 }
+function _planInputsStamp(){
+  return sessionsRev+"|"+deloadSkips.length+"|"+curProg()+"|"+weekKey(new Date().toISOString())+"|"+JSON.stringify(subs);
+}
+let _pfCache = Object.create(null), _pfStamp = null;
 function planFor(e){
+  const st = _planInputsStamp();
+  if (_pfStamp !== st){ _pfCache = Object.create(null); _pfStamp = st; }
+  const hit = _pfCache[e.id]; if (hit) return hit;
+  return (_pfCache[e.id] = _planForRaw(e));
+}
+function _planForRaw(e){
   const last = lastEntryFor(e.id);
   if (!last) return {mode:"baseline", sets:null, last:null};
   const topW = Math.max(...last.sets.map(s=>s.w||0));
@@ -3591,7 +3636,7 @@ function toggleActivity(){ actOpen = !actOpen; render(); }
 function logActivity(){
   const name = (actDraft.name||"").trim(), mins = Number(actDraft.mins)||0;
   if (!name){ toast("Name the activity."); return; }
-  sessions.push({id:Date.now(), date:new Date().toISOString(), workout:"ACT", activity:{name, mins}, entries:{}, prog:curProg()});
+  sessions.push({id:Date.now(), date:new Date().toISOString(), workout:"ACT", activity:{name, mins}, entries:{}, prog:curProg()}); bumpSessions();
   actDraft = {name:"", mins:""}; actOpen = false;
   persist(); pushLog(); updateWeekBadge();
   toast("Activity logged.");
@@ -3736,15 +3781,19 @@ function liftAnalytics(exId){
   }
   return rows;
 }
+let _wvCache = null, _wvRev = -1;
 function weeklyVolumes(){
+  if (_wvCache && _wvRev === sessionsRev) return _wvCache;   // §2: totals only change when sessions change
   const byWeek={};
   for (const s of sessions){
     const k=weekKey(s.date); let vol=0;
-    Object.values(s.entries||{}).forEach(sets=>volSets(sets).forEach(x=>{vol+=x.w*x.r;}));
+    Object.values(s.entries||{}).forEach(sets=>volSets(sets).forEach(x=>{vol+=x.w*x.r;}));   // volSets: invariant preserved
     byWeek[k]=(byWeek[k]||0)+vol;
   }
-  return Object.entries(byWeek).sort((a,b)=>a[0].localeCompare(b[0]))
+  _wvRev = sessionsRev;
+  _wvCache = Object.entries(byWeek).sort((a,b)=>a[0].localeCompare(b[0]))
     .map(([k,v])=>({week:k, label:fmtDate(k), value:Math.round(v)}));
+  return _wvCache;
 }
 function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 let toastTimer=null;
@@ -3942,19 +3991,31 @@ function readinessRing(score){
 }
 function renderTrain(){
   const w = WORKOUTS[workoutId];
-  const todayDow = new Date().getDay();
-  const dayName = new Date().toLocaleDateString(undefined,{weekday:"long"});
+  const _now = new Date();                       // §3: one Date per render
+  const todayDow = _now.getDay();
+  const dayName = _now.toLocaleDateString(undefined,{weekday:"long"});
   const todayW = scheduleFor(todayDow);
 
   const exs = effEx(workoutId);
-  const plans = {}; let readyCount=0; const stalls=[];
-  for (const e of exs){
-    plans[e.id] = planFor(e);
-    if (plans[e.id].mode==="add") readyCount++;
-    if (isStalled(e.id) && !stallMutes.includes(e.id)) stalls.push({id:e.id, name:e.name});
+  // §1: plans/stalls depend only on (sessions, deloadSkips, program, subs, current week) —
+  // NOT on entered values or which workout is displayed. Cache per workout; the mute
+  // filter stays at render time so mute/unmute reflects instantly without invalidation.
+  const _pstamp = _planInputsStamp();
+  if (_planStamp !== _pstamp){ _planCache = Object.create(null); _planStamp = _pstamp; }
+  let _pc = _planCache[workoutId];
+  if (!_pc){
+    const plans = {}; let readyCount=0; const stallsRaw=[];
+    for (const e of exs){
+      plans[e.id] = planFor(e);                                   // planFor -> workSets(): invariant preserved
+      if (plans[e.id].mode==="add") readyCount++;
+      if (isStalled(e.id)) stallsRaw.push({id:e.id, name:e.name});
+    }
+    _pc = _planCache[workoutId] = {plans, readyCount, stallsRaw};
   }
+  const plans = _pc.plans, readyCount = _pc.readyCount;
+  const stalls = _pc.stallsRaw.filter(s=>!stallMutes.includes(s.id));
   const vols = weeklyVolumes();
-  const thisW = weekKey(new Date().toISOString());
+  const thisW = weekKey(_now.toISOString());
   const curVol = (vols.find(v=>v.week===thisW)||{value:0}).value;
   let prevVol = 0;
   if (vols.length){
@@ -4404,7 +4465,7 @@ function saveSession(){
   const exN = {};
   for (const k of Object.keys(noteDrafts)) if (noteDrafts[k] && noteDrafts[k].trim() && entries[k]) exN[k]=noteDrafts[k].trim();
   if (Object.keys(exN).length) sess.exNotes = exN;
-  sessions.push(sess);
+  sessions.push(sess); bumpSessions();
   // Numbers stay on screen after saving \u2014 they clear on day rollover or an explicit clear.
   persist(); adjustOpen=null; pickerFor=null; noteOpen=null; stopRest(); saveDraft();
   wkStart = 0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
@@ -4452,7 +4513,7 @@ function unmuteStall(exId){
 }
 function deleteSession(id){
   if (!confirm("Delete this session? Its sets leave your history and analytics.")) return;
-  sessions = sessions.filter(s=>s.id!==id);
+  sessions = sessions.filter(s=>s.id!==id); bumpSessions();
   if (!deletedIds.includes(id)) deletedIds.push(id);
   histEdit = null;
   persist(); toast("Session deleted."); render();
@@ -5039,7 +5100,7 @@ function importData(input){
       if (!Array.isArray(p.sessions)) throw 0;
       const ids = new Set(sessions.map(s=>s.id));
       let added=0;
-      p.sessions.forEach(s=>{ if(!ids.has(s.id)){ sessions.push(s); added++; } });
+      p.sessions.forEach(s=>{ if(!ids.has(s.id)){ sessions.push(s); added++; } }); bumpSessions();
       sessions.sort((a,b)=>a.id-b.id);
       persist(); toast("Imported "+added+" sessions."); render();
     } catch(e){ toast("Invalid backup file."); }

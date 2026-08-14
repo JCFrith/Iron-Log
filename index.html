@@ -2022,7 +2022,14 @@ function applyProgram(p){
   WEEK_TARGET = p.weekTarget || 5;
   DELOAD_EVERY = (p.deloadEvery===0) ? 0 : (p.deloadEvery || 7);
   PROG_REST = Number(p.rest) || 0;
-  if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = scheduleFor(new Date().getDay()) || Object.keys(WORKOUTS)[0];
+  // Snap to today's scheduled workout for THIS program's schedule. The boot-time pick
+  // (line ~3422) used the builtin schedule and may be stale; recompute unless a same-day
+  // draft explicitly selected a workout (handled in restoreDraft, which runs after this).
+  const sameDayDraft = (typeof draftWorkout!=="undefined" && draftWorkout && typeof draftDay!=="undefined" && draftDay===dayKey());
+  const sched = scheduleFor(new Date().getDay());
+  if (sameDayDraft && WORKOUTS[draftWorkout]) workoutId = draftWorkout;       // user's manual same-day pick wins
+  else if (sched && WORKOUTS[sched]) workoutId = sched;                        // else today's scheduled workout
+  else if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
 }
 const BUILTIN_WORKOUTS = {
   A:{label:"Workout A",tag:"HEAVY",exercises:[
@@ -2048,7 +2055,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "14.4";
+const APP_VERSION = "14.5";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3333,6 +3340,7 @@ function dayKey(d){
   return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0");
 }
 let draftDay = dayKey();
+let draftWorkout = null; // set if a same-day draft explicitly selected a workout
 let wkStart = 0;           // workout timer start (ms epoch); persists via draft
 let wkTimerInt = null;
 function beginWorkout(){
@@ -5035,7 +5043,7 @@ try {
   else if (d && d.day===dayKey() && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
     // only restore the selected workout when the draft is from TODAY, so yesterday's
     // pick never overrides today's scheduled workout
-    if (d.workoutId && WORKOUTS[d.workoutId]) workoutId = d.workoutId;
+    if (d.workoutId && WORKOUTS[d.workoutId]) { workoutId = d.workoutId; draftWorkout = d.workoutId; }
     values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{};
     if (d.day) draftDay = d.day;
     if (d.wkStart && Date.now()-d.wkStart < DRAFT_TTL){ wkStart = d.wkStart; startWkTick(); }

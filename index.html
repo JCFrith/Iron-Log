@@ -2299,34 +2299,8 @@ let myCoachNotes = [];      // notes addressed to me (athlete)
 let whoopRec = null;        // my recovery cache row
 const WHOOP_FN = SUPA + "/functions/v1/whoop-callback";
 let whoopDays = [];   // my 30d history
-let whoopWorkouts = [];  // unimported WHOOP workouts
 let whoopAllWorkouts = [];
 let whoopBody = null;
-async function loadWhoopWorkouts(){
-  if (!auth) return;
-  try {
-    const r = await sb("/rest/v1/whoop_workouts?select=*&user_id=eq."+auth.uid+"&imported=eq.false&order=start_at.desc&limit=10");
-    if (r.ok) whoopWorkouts = await r.json();
-  } catch(e){}
-}
-async function importWhoopWorkout(id){
-  const w = whoopWorkouts.find(x=>x.id===id);
-  if (!w) return;
-  const mins = w.end_at ? Math.round((new Date(w.end_at)-new Date(w.start_at))/60000) : 0;
-  bumpSessions(); sessions.push({id:Date.now(), date:w.start_at, workout:"ACT",
-    activity:{name:w.sport||"Workout", mins}, entries:{}, prog:curProg(), whoop_id:w.id});
-  persist(); pushLog();
-  try { await sb("/rest/v1/whoop_workouts?id=eq."+encodeURIComponent(id), { method:"PATCH", body:{ imported:true } }); } catch(e){}
-  whoopWorkouts = whoopWorkouts.filter(x=>x.id!==id);
-  updateWeekBadge();
-  toast("Imported.");
-  render();
-}
-async function dismissWhoopWorkout(id){
-  try { await sb("/rest/v1/whoop_workouts?id=eq."+encodeURIComponent(id), { method:"PATCH", body:{ imported:true } }); } catch(e){}
-  whoopWorkouts = whoopWorkouts.filter(x=>x.id!==id);
-  render();
-}
 async function loadWhoop(){
   if (!auth) return;
   try {
@@ -2607,7 +2581,7 @@ async function whoopSync(silent){
       headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"sync"}) });
     const j = await r.json();
-    if (j.synced){ await loadWhoop(); await loadWhoopWorkouts(); render(); }
+    if (j.synced){ await loadWhoop(); render(); }
     else if (!silent && j.reconnect) toast("WHOOP link expired \u2014 reconnect from the menu.");
   } catch(e){ if (!silent) toast("WHOOP sync failed."); }
 }
@@ -2951,7 +2925,6 @@ async function afterAuth(){
       pullMergePush(),
       loadMyCoachNotes(),
       loadWhoop(),
-      loadWhoopWorkouts(),
     ]);
     if (tagLegacySessions()) pushLog();
     saveBootCache();
@@ -3064,7 +3037,6 @@ function renderTut(){
   h += T("RPE (optional)", "Turn on <b>Log RPE per set</b> in the \u2630 menu to record how hard each set felt (6\u201310). Tap a chip to cycle. It never changes your targets \u2014 it gives your coach the effort behind the numbers.");
   h += T("Found a bug?", "\u2630 menu \u2192 <b>Report a bug / suggest a feature</b>. It lands in your coach\u2019s inbox on the Coach tab \u2014 screenshots aren\u2019t supported yet, so describe what you saw.");
   h += T("WHOOP", "Connect WHOOP from this menu and your morning recovery, HRV, and sleep appear on the Session tab. Green (67%+): train as planned. Red (under 34%): the app suggests easing off \u2014 your call, or your coach\u2019s.");
-  h += T("WHOOP workouts", "Cardio, yoga, or sport recorded on WHOOP shows up on your Session tab under \u201CFrom WHOOP\u201D \u2014 tap <b>Log it</b> to count it toward your week, or \u2715 to ignore. Lifting sessions you log in Iron Log already count; don\u2019t double-log them.");
   h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
   h += T("Deload weeks", "Every 7th training week the app cuts loads to ~50% automatically. Take it \u2014 that\u2019s when growth consolidates. Or hit Skip and the counter resets.");
   h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Saved sessions sync to your account, so your history follows you to any device.");
@@ -4141,16 +4113,6 @@ function renderTrain(){
 
   // ===== Schedule strip =====
   h += '<button class="silink" onclick="toggleActivity()">+ Log an activity instead (yoga, cardio\u2026)</button>';
-  if (whoopWorkouts.length){
-    h += '<div class="panel a"><div class="menusect">From WHOOP</div>';
-    whoopWorkouts.slice(0,3).forEach(w=>{
-      const mins = w.end_at ? Math.round((new Date(w.end_at)-new Date(w.start_at))/60000) : 0;
-      h += '<div class="wimp"><span class="d">'+esc(w.sport||"Workout")+' \u00B7 '+fmtDate(w.start_at)+(mins?' \u00B7 '+mins+' min':'')+(w.strain!=null?' \u00B7 strain '+w.strain:'')+'</span>'
-        +'<span class="wbtns"><button class="sibtn sm" onclick="importWhoopWorkout(\''+w.id+'\')">Log it</button>'
-        +'<button class="delbtn" onclick="dismissWhoopWorkout(\''+w.id+'\')">\u2715</button></span></div>';
-    });
-    h += '<p class="statline">Strength sessions you log here already count \u2014 import these only if they\u2019re extra work (yoga, cardio, sport).</p></div>';
-  }
   if (whoopRec && whoopRec.recovery_score!=null){
     const sc = Math.round(whoopRec.recovery_score);
     h += '<div class="panel a whooprow"><span class="recdot '+recBand(sc)+'"></span><span class="rectext"><b class="num">'+sc+'%</b> recovery'

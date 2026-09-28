@@ -1973,6 +1973,70 @@
     .setrow.rm { grid-template-columns:44px minmax(0,1fr) minmax(0,.9fr) 36px; }
     .setrow.bwrow { grid-template-columns:44px minmax(0,1fr); }
   }
+  /* ============ v15.1 motion pass (Emil Kowalski design-engineering rules) ============ */
+  :root {
+    --ease-out:cubic-bezier(.23,1,.32,1);
+    --ease-in-out:cubic-bezier(.77,0,.175,1);
+    --ease-drawer:cubic-bezier(.32,.72,0,1);
+    --sp:var(--ease-out); --motion-spring:var(--ease-out); --motion-swift:var(--ease-out);
+  }
+  /* constant decorative motion on a daily-use tool: stop it. The running-workout pulse stays (it signals state). */
+  body::after, .brand::before, .brief::before, .brief::after, .baction, .baction::before, .sibtn::before, .savebtn, .savebtn::before, .aorb { animation:none !important; }
+  .pulse.still { animation:none !important; }
+  /* named properties instead of transition:all */
+  .exidx { transition:color .2s ease, background-color .2s ease, border-color .2s ease; }
+  .setchip, .adjbtn { transition:transform .14s var(--ease-out), background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease; }
+  .spark { transition:transform .14s var(--ease-out), border-color .2s ease, background-color .2s ease; }
+  /* press feedback: one consistent subtle scale */
+  .baction:active, .savebtn:active, .prefillbtn:active, .opt:active, .addset:active, .abtn:active,
+  .sibtn:active, .fbk:active, .chip:active, .coachcard:active, .tabs button:active, .switchrow button:active,
+  .spark:active, .pathbtn:active, .daychip:active { transform:scale(.97); }
+  .burger:active, .notebtn:active, .delbtn:active, .rmset:active, .setchip:active, .adjbtn:active,
+  .stepper button:active, .day:active { transform:scale(.95); }
+  .burger { transition:transform .14s var(--ease-out), background-color .2s ease, border-color .2s ease; }
+  .stepper button, .notebtn, .delbtn, .rmset, .day, .daychip, .sibtn, .chip, .fbk, .opt, .addset, .abtn, .pathbtn, .tabs button {
+    transition-property:transform, background-color, border-color, color, box-shadow, filter, opacity;
+    transition-duration:.14s, .2s, .2s, .2s, .2s, .2s, .2s;
+    transition-timing-function:var(--ease-out);
+  }
+  .silink:active { transform:none; opacity:.7; }
+  .exnamebtn:active .swapic { transform:none; }
+  .tabs button::after { transition:transform .22s var(--ease-out), opacity .18s ease; }
+  .brief.glass { transition:border-color .2s ease, box-shadow .2s ease; }
+  .exc { transition:border-color .2s ease, box-shadow .2s ease, background-color .2s ease; }
+  .exc::after { transition:opacity .2s ease; }
+  /* content entrance on tab switch: short, small travel */
+  @keyframes ilRise { from { opacity:0; transform:translate3d(0,6px,0); } to { opacity:1; transform:none; } }
+  main .a { animation:ilRise .22s var(--ease-out) both; }
+  main.noanim .a { animation:none; }
+  /* menu grows from the burger that opened it */
+  @keyframes ilMenu { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:none; } }
+  .menu { transform-origin:top right; animation:ilMenu .18s var(--ease-out) both; }
+  @keyframes ilFade { from { opacity:0; } to { opacity:1; } }
+  .menuback, .sheetback { animation:ilFade .2s ease both; }
+  /* sheets: iOS drawer curve, travel by own height */
+  @keyframes ilSheet { from { transform:translate3d(0,100%,0); } to { transform:none; } }
+  .sheet { animation:ilSheet .32s var(--ease-drawer) both; }
+  @keyframes ilSheetW { from { transform:translate3d(-50%,100%,0); } to { transform:translate3d(-50%,0,0); } }
+  @media (min-width:700px) { .sheet { animation-name:ilSheetW; } }
+  main.ovl-steady .menu, main.ovl-steady .menuback, main.ovl-steady .sheet, main.ovl-steady .sheetback { animation:none; }
+  /* toast: in fast, out faster */
+  @keyframes ilToastIn { from { opacity:0; transform:translate(-50%,12px) scale(.97); } to { opacity:1; transform:translate(-50%,0); } }
+  @keyframes ilToastOut { from { opacity:1; transform:translate(-50%,0); } to { opacity:0; transform:translate(-50%,6px) scale(.98); } }
+  .toast { animation:ilToastIn .22s var(--ease-out) both; }
+  .toast.out { animation:ilToastOut .16s var(--ease-out) both; }
+  /* completion + PR: rare moments, a little character, never from scale(0) */
+  @keyframes ilComplete { from { transform:scale(.82); } 60% { transform:scale(1.06); } to { transform:scale(1); } }
+  .exc.full .exidx { animation:ilComplete .3s var(--ease-out) both; }
+  @keyframes prbounce { 0% { opacity:0; transform:scale(.6) rotate(-12deg); } 60% { opacity:1; transform:scale(1.1) rotate(4deg); } 100% { transform:none; } }
+  @keyframes pop { from { transform:scale(.7); opacity:0; } to { transform:none; opacity:1; } }
+  @media (hover:none) { .hb:hover { transform:none; filter:none; } }
+  /* reduced motion: keep fades, drop movement */
+  @media (prefers-reduced-motion:reduce) {
+    main .a, .menu, .sheet, .toast, .menuback, .sheetback { animation:ilFade .18s ease both !important; animation-duration:.18s !important; }
+    .toast.out { animation:none !important; opacity:0; }
+    main.ovl-steady .menu, main.ovl-steady .sheet, main.ovl-steady .menuback, main.ovl-steady .sheetback { animation:none !important; }
+  }
   </style>
 </head>
 <body>
@@ -2092,7 +2156,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "15.0";
+const APP_VERSION = "15.1";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3220,13 +3284,15 @@ function hydrateBootCache(){
 }
 (function(){
   if (typeof addEventListener !== "function" || !document.documentElement || !document.documentElement.style) return;
-  let tick = false;
+  let tick = false, lastShift = -1, grid = null;
   addEventListener("scroll", function(){
     if (tick) return; tick = true;
     requestAnimationFrame(function(){
       tick = false;
       const y = (typeof scrollY==="number"? scrollY : 0);
-      document.documentElement.style.setProperty("--scroll-shift", Math.min(34, y*.035)+"px");
+      const sh = Math.min(34, y*.035);
+      if (sh !== lastShift){ lastShift = sh; const g = grid || (grid = document.querySelector(".agrid"));
+        if (g) g.style.transform = "perspective(900px) rotateX(64deg) translate3d(0, calc(24% + "+sh+"px), 0) scale(1.35)"; }
     });
   }, {passive:true});
 })();
@@ -3808,8 +3874,8 @@ function haptic(kind){
 }
 function toast(msg, cls){
   document.querySelectorAll(".toast").forEach(t=>t.remove());
-  const t=document.createElement("div"); t.className="toast"+(cls?" "+cls:""); t.textContent=msg; document.body.appendChild(t);
-  clearTimeout(toastTimer); toastTimer=setTimeout(()=>{ if(t.remove) t.remove(); },2600);
+  const t=document.createElement("div"); t.className="toast"+(cls?" "+cls:""); t.textContent=msg; t.setAttribute("role","status"); document.body.appendChild(t);
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>{ t.classList.add("out"); setTimeout(()=>{ if(t.remove) t.remove(); },180); },2600);
 }
 function findEx(exId){
   return effEx(workoutId).find(x=>x.id===exId)
@@ -3838,6 +3904,7 @@ function updateWeekBadge(){
   const el = document.getElementById("weekbadge");
   if (el) el.innerHTML = "<b>"+n+"/"+WEEK_TARGET+"</b> this week";
 }
+let lastOvKey = "";
 function render(){
   if (typeof draftDay!=="undefined" && draftDay !== dayKey()){ maybeRollover(); }
   updateWeekBadge();
@@ -3848,7 +3915,10 @@ function render(){
     : tab==="train" ? renderTrain() : tab==="coach" ? renderCoach() : renderProgress())
     + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "") + (fbOpen ? renderFeedback() : "")
     + (histEdit ? renderHistEdit() : "") + (actOpen ? renderActivity() : "");
-  document.body.classList.toggle("il-modal", !!(menuOpen||plateOpen||tutOpen||fbOpen||histEdit||actOpen));
+  const ovKey = [menuOpen,plateOpen,tutOpen,fbOpen,!!histEdit,actOpen].map(Number).join("");
+  document.body.classList.toggle("il-modal", ovKey.indexOf("1")>=0);
+  m.classList.toggle("ovl-steady", ovKey===lastOvKey && ovKey.indexOf("1")>=0);
+  lastOvKey = ovKey;
   if (tab==="progress") setTimeout(animateArea, 30);
 }
 
@@ -4067,7 +4137,7 @@ function renderTrain(){
   let h = acct + '<div class="brief glass a">';
   const recSc = recToday();
   const status = recSc==null ? null : recSc>=67 ? {t:"READY", c:"ok"} : recSc>=34 ? {t:"STEADY", c:"warn"} : {t:"RECOVER FIRST", c:"bad"};
-  h += '<div class="kicker"><span class="pulse"></span>Briefing \u00B7 '+esc(dayName)+' \u00B7 '+fmtDate(new Date().toISOString())+(programName?' \u00B7 '+esc(programName):'')
+  h += '<div class="kicker"><span class="pulse still"></span>Briefing \u00B7 '+esc(dayName)+' \u00B7 '+fmtDate(new Date().toISOString())+(programName?' \u00B7 '+esc(programName):'')
     +(todayW ? (todayW!==workoutId ? ' \u00B7 switched' : ' \u00B7 scheduled') : ' \u00B7 rest day')+'</div>';
   h += '<div class="briefrow">'
     + '<div class="briefmain"><div class="btitle disp">'+esc(w.label)+'</div>'

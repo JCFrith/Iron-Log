@@ -2037,7 +2037,9 @@
     .toast.out { animation:none !important; opacity:0; }
     main.ovl-steady .menu, main.ovl-steady .sheet, main.ovl-steady .menuback, main.ovl-steady .sheetback { animation:none !important; }
   }
-  </style>
+    /* four-tab bar (Session, Food, Progress, Coach) fits a phone */
+  @media (max-width:440px){ .tabs button { min-width:0; padding:0 2px; font-size:12.5px; letter-spacing:.07em; } }
+</style>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute"><defs>
@@ -2056,12 +2058,14 @@
   </div>
   <div class="tabs">
     <button id="tab-train" class="on" onclick="setTab('train')">Session</button>
+    <button id="tab-food" onclick="setTab('food')">Food</button>
     <button id="tab-progress" onclick="setTab('progress')">Progress</button>
     <button id="tab-coach" onclick="setTab('coach')" style="display:none">Coach</button>
   </div>
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
+<script src="nutrition.js?v=15.3"></script>
 <script>
 
 "use strict";
@@ -2158,7 +2162,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "15.2";
+const APP_VERSION = "15.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3920,7 +3924,7 @@ function findEx(exId){
 // ================= Render =================
 function setTab(t){
   tab=t; adjustOpen=null; if (t!=="coach") coachView=null;
-  ["train","progress","coach"].forEach(x=>{
+  ["train","food","progress","coach"].forEach(x=>{
     const b=document.getElementById("tab-"+x);
     if (b) b.className = (x===t?"on":"");
   });
@@ -3947,7 +3951,7 @@ function render(){
   m.classList.toggle("noanim", lastTabRendered===tab);
   lastTabRendered = tab;
   m.innerHTML = ((!auth && !localOnly) ? renderWelcome()
-    : tab==="train" ? renderTrain() : tab==="coach" ? renderCoach() : renderProgress())
+    : tab==="train" ? renderTrain() : tab==="food" ? (typeof renderFood==="function" ? renderFood() : "") : tab==="coach" ? renderCoach() : renderProgress())
     + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "") + (fbOpen ? renderFeedback() : "")
     + (histEdit ? renderHistEdit() : "") + (actOpen ? renderActivity() : "");
   const ovKey = [menuOpen,plateOpen,tutOpen,fbOpen,!!histEdit,actOpen].map(Number).join("");

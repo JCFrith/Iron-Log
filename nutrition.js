@@ -31,6 +31,7 @@ const NI = { // stroke icons, 24 viewBox, inherit currentColor
   caret:'<path d="M7 10l5 5 5-5z" fill="currentColor" stroke="none"/>',
   bowl:'<path d="M3 11h18a9 7.5 0 0 1-18 0z"/><path d="M7 7h10"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
+  chev:'<path d="M6 9l6 6 6-6"/>',
 };
 const nIcon = (k, s) => '<svg class="nic" width="'+(s||22)+'" height="'+(s||22)+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(NI[k]||"")+'</svg>';
 
@@ -42,7 +43,9 @@ const nut = {
   loadedFor: null, weekFor: null, loading: false,
   view: null,            // null | add | pick | label | recipe
   target: null,          // {kind:"meal", type} | {kind:"recipe"}
-  addTab: "recent",      // recent | meals
+  addTab: "recent",      // recent | meals | recipes
+  openItem: null,        // meal_item id expanded on the Food tab
+  collapsed: (()=>{ try { return JSON.parse(localStorage.getItem("iron-log-food-sections")||"{}") || {}; } catch(e){ return {}; } })(),
   results: [], pick: null, qty: "1", unit: "serving",
   manual: { name:"", kcal:"", p:"", c:"", f:"" }, showManual: false,
   label: null,           // {status, form, img, barcode}
@@ -81,6 +84,15 @@ const nut = {
   .nsec { display:flex; justify-content:space-between; align-items:center; margin:20px 2px 10px; }
   .nsec h2 { color:#fff; font-size:20px; font-weight:900; margin:0; }
   .nsec button { border:0; background:none; color:var(--accent-hi); font-size:15px; font-weight:800; }
+  .nsec button.nsech { display:flex; align-items:center; gap:6px; padding:4px 0; color:#fff; min-height:40px; }
+  .nsech .nic { color:var(--dim); transition:transform .2s ease; }
+  .nsech.shut .nic { transform:rotate(-90deg); }
+  .nsec .nsecsum { color:var(--dim); font-size:12.5px; font-weight:700; margin-left:4px; }
+  .nmx { margin:2px 0 0 40px; color:var(--dim); font-size:13px; font-weight:700; }
+  .nitem.tap { cursor:pointer; }
+  .nitem .nn b .go { color:var(--accent-hi); font-size:12px; font-weight:800; margin-left:6px; }
+  .nitemx { padding:2px 0 10px; }
+  .nitemx .nmacrow { margin-top:6px; }
   .nmeal { border-radius:18px; padding:14px 14px 14px 16px; margin-bottom:10px; background:linear-gradient(145deg,rgba(28,28,28,.92),rgba(17,17,17,.88)); border:1px solid var(--border); }
   .nmh { display:flex; align-items:center; gap:14px; }
   .nmh .nic { color:var(--accent-hi); flex:none; }
@@ -315,7 +327,7 @@ async function nLoad(force){
     if (rp && rp.ok){ nut.recipes = await rp.json(); nut.recipes.forEach(r=>(r.recipe_items||[]).sort((a,b)=>a.position-b.position)); }
     if (needStatic) nut.staticLoaded = true;
     nut.loadedFor = day;
-  } catch(e){ toast("Couldn’t load food log."); }
+  } catch(e){ toast("Couldn\u2019t load food log."); }
   nut.loading = false;
   if (tab==="food") render();
 }
@@ -372,7 +384,7 @@ function nFromRow(row){
 }
 function nFromRecipe(rec){
   const t = nSum(rec.recipe_items), s = +rec.servings||1;
-  return { source:"recipe", recipe_id:rec.id, name:rec.name, brand:"", serving_g:null, serving_label:"1 meal",
+  return { source:"recipe", recipe_id:rec.id, kind:rec.kind||"recipe", name:rec.name, brand:"", serving_g:null, serving_label: nIsMealKind(rec) ? "1 meal" : "1 serving",
     per:{ kcal:t.kcal/s, p:t.p/s, c:t.c/s, f:t.f/s, fiber:t.fiber/s } };
 }
 async function nCacheFood(f){
@@ -419,7 +431,7 @@ async function nLogItem(item){
     m.meal_items = (m.meal_items||[]).concat([row]);
     nut.recent = [row].concat(nut.recent.filter(x=>x.name.toLowerCase()!==row.name.toLowerCase())).slice(0,12);
     nSyncWeek(); nResetAdd(); toast("Logged "+row.name+"."); render();
-  } catch(e){ toast("Couldn’t save that item."); }
+  } catch(e){ toast("Couldn\u2019t save that item."); }
 }
 function nResetAdd(){
   nut.view = nut.target && nut.target.kind==="recipe" ? "recipe" : null;
@@ -450,7 +462,7 @@ async function nDeleteItem(mealId, itemId){
     const r = await sb("/rest/v1/meal_items?id=eq."+itemId, { method:"DELETE" });
     if (!r.ok) throw new Error();
     if (!m.meal_items.length){ await sb("/rest/v1/meals?id=eq."+m.id, { method:"DELETE" }); nut.meals = nut.meals.filter(x=>x.id!==m.id); render(); }
-  } catch(e){ m.meal_items = keep; nSyncWeek(); render(); toast("Couldn’t delete."); }
+  } catch(e){ m.meal_items = keep; nSyncWeek(); render(); toast("Couldn\u2019t delete."); }
 }
 async function nClearMeal(type){
   const m = nut.meals.find(x=>x.meal_type===type); nut.menuFor = null;
@@ -458,7 +470,7 @@ async function nClearMeal(type){
   if (!confirm("Clear everything logged for this meal?")) { render(); return; }
   nut.meals = nut.meals.filter(x=>x!==m); nSyncWeek(); render();
   try { const r = await sb("/rest/v1/meals?id=eq."+m.id, { method:"DELETE" }); if (!r.ok) throw new Error(); }
-  catch(e){ nut.meals.push(m); nSyncWeek(); render(); toast("Couldn’t clear."); }
+  catch(e){ nut.meals.push(m); nSyncWeek(); render(); toast("Couldn\u2019t clear."); }
 }
 // ---------- add flow ----------
 function nOpenAdd(type){ nut.target = { kind:"meal", type }; nut.view = "add"; nut.addTab = "recent"; nut.results = []; nut.menuFor = null; render();
@@ -507,7 +519,7 @@ async function nSearch(){
   const el = document.getElementById("nq"); const q = el ? el.value.trim() : "";
   if (q.length<2){ toast("Type at least 2 letters."); return; }
   if (/^\d{8,14}$/.test(q)){ nHandleBarcode(q); return; }
-  const box = document.getElementById("nres"); if (box) box.innerHTML = '<p class="statline">Searching…</p>';
+  const box = document.getElementById("nres"); if (box) box.innerHTML = '<p class="statline">Searching\u2026</p>';
   const safe = q.replace(/[^a-zA-Z0-9 ]+/g," ").trim().replace(/\s+/g,"*");
   const mine = sb("/rest/v1/foods?select=*&source=eq.custom&or=(name.ilike.*"+encodeURIComponent(safe)+"*,brand.ilike.*"+encodeURIComponent(safe)+"*)&limit=6")
     .then(r=>r.ok ? r.json() : []).then(rows=>rows.map(nFromRow)).catch(()=>[]);
@@ -526,7 +538,7 @@ function nPaintResults(){
   box.innerHTML = nut.results.map((f,i)=>{
     const tag = f.source==="usda" ? "USDA" : f.source==="off" ? "OFF" : "Mine";
     return '<button class="nr" onclick="nPickResult('+i+')"><div><b>'+esc(f.name)+'<span class="nsrc">'+tag+'</span></b>'
-      +'<span>'+(f.brand?esc(f.brand)+' · ':'')+esc(nServingText(f))+' · P '+r0(f.per.p)+' C '+r0(f.per.c)+' F '+r0(f.per.f)+'</span></div>'
+      +'<span>'+(f.brand?esc(f.brand)+' \u00B7 ':'')+esc(nServingText(f))+' \u00B7 P '+r0(f.per.p)+' C '+r0(f.per.c)+' F '+r0(f.per.f)+'</span></div>'
       +'<span class="k">'+r0(f.per.kcal)+'</span></button>';
   }).join("");
 }
@@ -547,7 +559,7 @@ async function nScanOpen(){
   nScanClose();
   const o = document.createElement("div"); o.id = "nscan"; o.className = "nscan";
   o.innerHTML = '<video playsinline webkit-playsinline muted autoplay></video><div class="guide"></div><div class="bar">'
-    +'<div class="msg" id="nscanmsg">Starting camera…</div>'
+    +'<div class="msg" id="nscanmsg">Starting camera\u2026</div>'
     +'<button class="sibtn" onclick="nScanPhoto()">Snap a photo of the barcode</button>'
     +'<div class="row"><input class="ninput" id="nscancode" inputmode="numeric" placeholder="Or type the barcode number" onkeydown="if(event.key===\'Enter\')nScanTyped()"><button class="sibtn" onclick="nScanTyped()">Look up</button></div>'
     +'<button class="x" onclick="nScanClose()">Cancel</button></div>';
@@ -572,7 +584,7 @@ async function nScanOpen(){
       tick();
       return;
     }
-    nScanMsg("Loading scanner…");
+    nScanMsg("Loading scanner\u2026");
     const ZX = await nLoadScript(LIB_ZXING, "ZXingBrowser");
     if (!document.getElementById("nscan")) return;
     const reader = new ZX.BrowserMultiFormatOneDReader(nZxHints(), { delayBetweenScanAttempts:120, delayBetweenScanSuccess:500 });
@@ -593,9 +605,9 @@ function nScanFocus(stream){
 }
 function nScanPhoto(){
   nPickFile("image/*", true, async f=>{
-    nScanMsg("Reading barcode…");
+    nScanMsg("Reading barcode\u2026");
     try { const code = await nDecodeBarcodeFile(f); nScanClose(); nHandleBarcode(code); }
-    catch(e){ nScanMsg(e && e.message==="nocode" ? "Couldn’t find a barcode in that photo. Fill the frame with the barcode, keep it sharp, and try again." : "Couldn’t read that photo ("+nErr(e)+")."); }
+    catch(e){ nScanMsg(e && e.message==="nocode" ? "Couldn\u2019t find a barcode in that photo. Fill the frame with the barcode, keep it sharp, and try again." : "Couldn\u2019t read that photo ("+nErr(e)+")."); }
   });
 }
 // Decode UPC/EAN from a still photo: full frame, center strips, and rotated, at a size ZXing handles well.
@@ -653,12 +665,12 @@ async function nLookupBarcode(code){
   return null;
 }
 async function nHandleBarcode(code){
-  toast("Looking up "+code+"…");
+  toast("Looking up "+code+"\u2026");
   const f = await nLookupBarcode(code);
   if (f){ nPickFood(f, "barcode"); return; }
   nut.label = { status:"idle", barcode:String(code).replace(/\D/g,""), form:null, img:null };
   nut.view = "label"; render();
-  toast("Not in the food databases yet. Snap the label and it’s saved for next time.");
+  toast("Not in the food databases yet. Snap the label and it\u2019s saved for next time.");
 }
 
 // ---------- nutrition label photo (on-device OCR) ----------
@@ -823,17 +835,18 @@ async function nLabelSave(){
 }
 
 // ---------- saved meals (recipes) ----------
-function nNewRecipe(){ nut.recipe = { id:null, name:"", servings:"4", items:[], _dirty:false }; nut.view = "recipe"; nut.target = { kind:"recipe" }; render(); }
-function nOpenRecipe(i){
-  const r = nut.recipes[i]; if (!r) return;
-  nut.recipe = { id:r.id, name:r.name, servings:String(+r.servings), items:(r.recipe_items||[]).map(x=>Object.assign({}, x)), _dirty:false };
-  nut.view = "recipe"; nut.target = { kind:"recipe" }; render();
+function nNewRecipe(){ nut.recipe = { id:null, kind:"recipe", name:"", servings:"4", items:[], _dirty:false }; nut.view = "recipe"; nut.target = { kind:"recipe" }; render(); try { scrollTo({top:0}); } catch(e){} }
+function nOpenRecipe(i){ const r = nut.recipes[i]; if (r) nOpenRecipeId(r.id); }
+function nOpenRecipeId(id){
+  const r = nRecipeById(id); if (!r) return;
+  nut.recipe = { id:r.id, kind:r.kind||"recipe", name:r.name, servings:String(+r.servings), items:(r.recipe_items||[]).map(x=>Object.assign({}, x)), _dirty:false };
+  nut.view = "recipe"; nut.target = { kind:"recipe" }; nut.openItem = null; render(); try { scrollTo({top:0}); } catch(e){}
 }
 function nSaveMealAsRecipe(type){
   const m = nut.meals.find(x=>x.meal_type===type); nut.menuFor = null;
   if (!m || !(m.meal_items||[]).length){ toast("Log something first."); render(); return; }
   const label = (MEAL_TYPES.find(x=>x[0]===type)||[0,"Meal"])[1];
-  nut.recipe = { id:null, name:label+" "+nDate(nut.day), servings:"1", _dirty:true,
+  nut.recipe = { id:null, kind:"meal", name:label+" "+nDate(nut.day), servings:"1", _dirty:true,
     items: m.meal_items.map(i=>({ name:i.name, food_id:i.food_id, qty: i.grams ? +i.grams : (+i.servings||1), unit: i.grams ? "g" : "serving",
       grams:i.grams, kcal:+i.kcal, protein_g:+i.protein_g, carb_g:+i.carb_g, fat_g:+i.fat_g, fiber_g:i.fiber_g })) };
   nut.view = "recipe"; nut.target = { kind:"recipe" }; render();
@@ -850,17 +863,19 @@ function nRecipeQty(idx, v){
 function nRecipeDel(idx){ nut.recipe.items.splice(idx,1); nut.recipe._dirty = true; render(); }
 function nPaintRecipeTotals(){ const el = document.getElementById("nrtot"); if (el) el.innerHTML = nRecipeTotalsHtml(); }
 function nRecipeTotalsHtml(){
-  const R = nut.recipe, t = nSum(R.items), s = parseFloat(R.servings)>0 ? parseFloat(R.servings) : 1;
+  const R = nut.recipe, t = nSum(R.items), s = R.kind==="meal" ? 1 : (parseFloat(R.servings)>0 ? parseFloat(R.servings) : 1);
   const cell = (v,l)=>'<div><b class="num">'+v+'</b><span>'+l+'</span></div>';
-  return '<p class="statline" style="margin-top:0">Per meal (÷ '+r1(s)+')</p>'
+  if (R.kind==="meal") return '<p class="statline" style="margin-top:0">This meal</p><div class="nmacrow">'+cell(nNum(t.kcal),"cal")+cell(r0(t.p)+"g","protein")+cell(r0(t.c)+"g","carbs")+cell(r0(t.f)+"g","fat")+'</div>'
+    + (t.fiber ? '<p class="statline">Fiber '+r0(t.fiber)+' g</p>' : '');
+  return '<p class="statline" style="margin-top:0">Per serving (\u00F7 '+r1(s)+')</p>'
     +'<div class="nmacrow">'+cell(nNum(t.kcal/s),"cal")+cell(r0(t.p/s)+"g","protein")+cell(r0(t.c/s)+"g","carbs")+cell(r0(t.f/s)+"g","fat")+'</div>'
-    +'<p class="statline">Whole batch: '+nNum(t.kcal)+' cal · P '+r0(t.p)+' C '+r0(t.c)+' F '+r0(t.f)+'</p>';
+    +'<p class="statline">Whole batch: '+nNum(t.kcal)+' cal \u00B7 P '+r0(t.p)+' C '+r0(t.c)+' F '+r0(t.f)+'</p>';
 }
 async function nRecipeSave(thenLog){
-  const R = nut.recipe; const s = parseFloat(R.servings);
-  if (!R.name.trim()){ toast("Name the meal."); return; }
-  if (!(s>0)){ toast("How many meals does it make?"); return; }
-  if (!R.items.length){ toast("Add at least one ingredient."); return; }
+  const R = nut.recipe; const isMeal = R.kind==="meal"; const s = isMeal ? 1 : parseFloat(R.servings);
+  if (!R.name.trim()){ toast(isMeal ? "Name the meal." : "Name the recipe."); return; }
+  if (!(s>0)){ toast("How many servings does it make?"); return; }
+  if (!R.items.length){ toast(isMeal ? "Add at least one food." : "Add at least one ingredient."); return; }
   try {
     let id = R.id;
     if (id){
@@ -868,27 +883,27 @@ async function nRecipeSave(thenLog){
       if (!r.ok) throw new Error();
       const d = await sb("/rest/v1/recipe_items?recipe_id=eq."+id, { method:"DELETE" }); if (!d.ok) throw new Error();
     } else {
-      const r = await sb("/rest/v1/recipes", { method:"POST", headers:{ Prefer:"return=representation" }, body:{ user_id:auth.uid, name:R.name.trim(), servings:s } });
+      const r = await sb("/rest/v1/recipes", { method:"POST", headers:{ Prefer:"return=representation" }, body:{ user_id:auth.uid, name:R.name.trim(), servings:s, kind:isMeal?"meal":"recipe" } });
       if (!r.ok) throw new Error(); id = (await r.json())[0].id; R.id = id;
     }
     const rows = R.items.map((it,i)=>({ recipe_id:id, user_id:auth.uid, food_id:it.food_id||null, name:it.name, qty:+it.qty||1, unit:it.unit==="g"?"g":"serving",
       grams:it.grams!=null?+it.grams:null, kcal:+it.kcal||0, protein_g:+it.protein_g||0, carb_g:+it.carb_g||0, fat_g:+it.fat_g||0, fiber_g:it.fiber_g!=null?+it.fiber_g:null, position:i }));
     const ins = await sb("/rest/v1/recipe_items", { method:"POST", headers:{ Prefer:"return=representation" }, body:rows });
     if (!ins.ok) throw new Error();
-    const saved = { id, user_id:auth.uid, name:R.name.trim(), servings:s, updated_at:new Date().toISOString(), recipe_items: await ins.json() };
+    const saved = { id, user_id:auth.uid, kind:isMeal?"meal":"recipe", name:R.name.trim(), servings:s, updated_at:new Date().toISOString(), recipe_items: (await ins.json()).sort((a,b)=>a.position-b.position) };
     nut.recipes = [saved].concat(nut.recipes.filter(x=>x.id!==id));
     R._dirty = false;
     toast("Saved "+saved.name+".");
     if (thenLog){ nut.target = { kind:"meal", type: thenLog }; nPickFood(nFromRecipe(saved), "recipe"); return; }
     nut.view = null; nut.target = null; nut.recipe = null; render();
-  } catch(e){ toast("Couldn’t save the meal."); }
+  } catch(e){ toast(isMeal ? "Couldn\u2019t save the meal." : "Couldn\u2019t save the recipe."); }
 }
 async function nRecipeDelete(){
   const R = nut.recipe; if (!R || !R.id){ nut.view=null; nut.recipe=null; render(); return; }
   if (!confirm("Delete "+R.name+"? Past logs keep their numbers.")) return;
   try { const r = await sb("/rest/v1/recipes?id=eq."+R.id, { method:"DELETE" }); if (!r.ok) throw new Error();
     nut.recipes = nut.recipes.filter(x=>x.id!==R.id); nut.view = null; nut.recipe = null; nut.target = null; render(); toast("Deleted."); }
-  catch(e){ toast("Couldn’t delete."); }
+  catch(e){ toast("Couldn\u2019t delete."); }
 }
 function nGuessMealType(){
   const h = new Date().getHours();
@@ -915,7 +930,7 @@ function renderFood(){
   const today = dayKey(), burned = nBurned(nut.day);
   let h = '<div class="ntop"><div class="ntitle">'+nDayLabel(nut.day)+nIcon("caret",22)
     +'<input type="date" value="'+nut.day+'" max="'+today+'" onchange="nSetDay(this.value)" aria-label="Pick a day"></div>'
-    +'<div class="nburn">'+nIcon("flame",18)+'<b class="num">'+(burned!=null?nNum(burned):"–")+'</b><span>burned</span></div></div>';
+    +'<div class="nburn">'+nIcon("flame",18)+'<b class="num">'+(burned!=null?nNum(burned):"\u2013")+'</b><span>burned</span></div></div>';
 
   h += '<div class="nweek">';
   const tgDefault = nut.goal ? null : 0;
@@ -948,40 +963,86 @@ function renderFood(){
   h += '</div></div>';
   if (!tg) h += '<p class="statline" style="margin:-2px 4px 6px">No targets yet. Set your goal at the bottom.</p>';
 
-  h += '<div class="nsec"><h2>Meals</h2></div>';
+  h += nSec("meals", "Meals", "", nMacroLine(nTotals()));
+  h += '<div'+nHide("meals")+'>';
   const training = nIsTrainingDay(nut.day);
   MEAL_TYPES.forEach(([type,label])=>{
     const m = nut.meals.find(x=>x.meal_type===type), items = m ? (m.meal_items||[]) : [];
     if (!items.length && (type==="pre_workout"||type==="post_workout") && !training) return;
-    const kc = nSum(items).kcal;
-    h += '<div class="nmeal"><div class="nmh">'+nIcon(type,26)+'<div class="nmn"><b>'+label+'</b>'+(items.length?'<span class="num">'+nNum(kc)+' cal</span>':'')+'</div>'
+    const mt = nSum(items);
+    h += '<div class="nmeal"><div class="nmh">'+nIcon(type,26)+'<div class="nmn"><b>'+label+'</b></div>'
       +'<button class="ndots" onclick="nut.menuFor=nut.menuFor===\''+type+'\'?null:\''+type+'\';render()" aria-label="'+label+' options">'+nIcon("dots",22)+'</button>'
-      +'<button class="nlog" onclick="nOpenAdd(\''+type+'\')">Log</button></div>';
+      +'<button class="nlog" onclick="nOpenAdd(\''+type+'\')">Log</button></div>'
+      +(items.length ? '<div class="nmx num">'+nMacroLine(mt)+'</div>' : '');
     if (nut.menuFor===type) h += '<div class="nmenu"><button onclick="nSaveMealAsRecipe(\''+type+'\')">Save as a meal</button><button onclick="nClearMeal(\''+type+'\')">Clear</button></div>';
     items.forEach(i=>{
-      h += '<div class="nitem"><div class="nn"><b>'+esc(i.name)+'</b><span>'+(i.recipe_id && i.servings ? r1(i.servings)+' meal'+(+i.servings===1?'':'s')+' · ' : i.grams ? r0(i.grams)+' g · ' : '')
+      const rec = i.recipe_id ? nRecipeById(i.recipe_id) : null;
+      const unitWord = rec && !nIsMealKind(rec) ? 'serving' : 'meal';
+      h += '<div class="nitem tap" onclick="nItemTap(\''+m.id+'\',\''+i.id+'\')"><div class="nn"><b>'+esc(i.name)+(rec?'<span class="go">'+(nIsMealKind(rec)?'Meal':'Recipe')+' \u203A</span>':'')+'</b><span>'
+        +(i.recipe_id && i.servings ? r1(i.servings)+' '+unitWord+(+i.servings===1?'':'s')+' \u00B7 ' : i.grams ? r0(i.grams)+' g \u00B7 ' : '')
         +'P '+r0(i.protein_g)+' C '+r0(i.carb_g)+' F '+r0(i.fat_g)+'</span></div>'
-        +'<div class="nm num">'+r0(i.kcal)+'<button class="delbtn sm" onclick="nDeleteItem(\''+m.id+'\',\''+i.id+'\')" aria-label="Delete">✕</button></div></div>';
+        +'<div class="nm num">'+r0(i.kcal)+'<button class="delbtn sm" onclick="event.stopPropagation();nDeleteItem(\''+m.id+'\',\''+i.id+'\')" aria-label="Delete">\u2715</button></div></div>';
+      if (nut.openItem===i.id){
+        const cell = (v,l)=>'<div><b class="num">'+v+'</b><span>'+l+'</span></div>';
+        const amt = i.grams ? r0(i.grams)+' g'+(i.servings && Math.abs(+i.servings-1)>0.01 ? ' ('+r1(i.servings)+' servings)' : '') : (i.servings ? r1(i.servings)+' serving'+(+i.servings===1?'':'s') : '');
+        h += '<div class="nitemx"><div class="nmacrow">'+cell(nNum(i.kcal),"cal")+cell(r1(i.protein_g)+"g","protein")+cell(r1(i.carb_g)+"g","carbs")+cell(r1(i.fat_g)+"g","fat")+'</div>'
+          +'<p class="statline" style="margin-top:6px">'+[amt, i.fiber_g!=null ? 'Fiber '+r1(i.fiber_g)+' g' : null, ENTRY_LABEL[i.entry_method] ? 'Added by '+ENTRY_LABEL[i.entry_method] : null].filter(Boolean).join(' \u00B7 ')+'</p></div>';
+      }
     });
     h += '</div>';
   });
+  h += '</div>';
 
-  h += '<div class="nsec"><h2>My meals</h2><button onclick="nNewRecipe()">+ New</button></div>';
-  if (!nut.recipes.length) h += '<p class="statline" style="margin:0 4px 6px">Build a batch once (every ingredient, how many meals it makes) and log a meal of it in one tap.</p>';
-  nut.recipes.forEach((r,i)=>{
+  const savedMeals = nut.recipes.filter(nIsMealKind), recipes = nut.recipes.filter(r=>!nIsMealKind(r));
+  h += nSec("saved", "Saved meals", "", savedMeals.length ? String(savedMeals.length) : "");
+  h += '<div'+nHide("saved")+'>';
+  if (!savedMeals.length) h += '<p class="statline" style="margin:0 4px 6px">Log a few foods to Breakfast, Lunch, or any meal, then tap \u2022\u2022\u2022 and Save as a meal to log the whole thing in one tap next time.</p>';
+  savedMeals.forEach(r=>{
     const f = nFromRecipe(r);
-    h += '<button class="nrec" onclick="nOpenRecipe('+i+')"><div><b>'+esc(r.name)+'</b><span class="num">Makes '+r1(r.servings)+' · per meal '+nNum(f.per.kcal)+' cal · P '+r0(f.per.p)+' C '+r0(f.per.c)+' F '+r0(f.per.f)+'</span></div>'+nIcon("bowl",24)+'</button>';
+    h += '<button class="nrec" onclick="nOpenRecipeId(\''+r.id+'\')"><div><b>'+esc(r.name)+'</b><span class="num">'+(r.recipe_items||[]).length+' foods \u00B7 '+nMacroLine({kcal:f.per.kcal,p:f.per.p,c:f.per.c,f:f.per.f})+'</span></div>'+nIcon("dinner",24)+'</button>';
   });
+  h += '</div>';
+  h += nSec("recipes", "Recipes", '<button onclick="nNewRecipe()">+ New</button>', recipes.length ? String(recipes.length) : "");
+  h += '<div'+nHide("recipes")+'>';
+  if (!recipes.length) h += '<p class="statline" style="margin:0 4px 6px">Build a batch once (every ingredient, how many servings it makes) and log a serving in one tap.</p>';
+  recipes.forEach(r=>{
+    const f = nFromRecipe(r);
+    h += '<button class="nrec" onclick="nOpenRecipeId(\''+r.id+'\')"><div><b>'+esc(r.name)+'</b><span class="num">Makes '+r1(r.servings)+' \u00B7 per serving '+nMacroLine({kcal:f.per.kcal,p:f.per.p,c:f.per.c,f:f.per.f})+'</span></div>'+nIcon("bowl",24)+'</button>';
+  });
+  h += '</div>';
 
   h += renderFoodGoal();
   return h;
 }
+function nCollapsed(k){ return !!nut.collapsed[k]; }
+function nToggleSec(k){
+  nut.collapsed[k] = !nut.collapsed[k];
+  try { localStorage.setItem("iron-log-food-sections", JSON.stringify(nut.collapsed)); } catch(e){}
+  render();
+}
+function nSec(k, title, right, sum){
+  const shut = nCollapsed(k);
+  return '<div class="nsec"><button class="nsech'+(shut?' shut':'')+'" onclick="nToggleSec(\''+k+'\')" aria-expanded="'+(!shut)+'"><h2>'+title+'</h2>'+nIcon("chev",18)
+    +(sum && shut ? '<span class="nsecsum">'+sum+'</span>' : '')+'</button>'+(shut ? '' : (right||''))+'</div>';
+}
+function nHide(k){ return nCollapsed(k) ? ' style="display:none"' : ''; }
+function nMacroLine(t){ return nNum(t.kcal)+' cal \u00B7 P '+r0(t.p)+' \u00B7 C '+r0(t.c)+' \u00B7 F '+r0(t.f); }
+function nRecipeById(id){ return nut.recipes.find(r=>r.id===id) || null; }
+function nIsMealKind(r){ return !!r && r.kind==="meal"; }
+function nItemTap(mealId, itemId){
+  const m = nut.meals.find(x=>x.id===mealId), it = m && (m.meal_items||[]).find(x=>x.id===itemId);
+  if (!it) return;
+  const r = it.recipe_id ? nRecipeById(it.recipe_id) : null;
+  if (r){ nOpenRecipeId(r.id); return; }
+  nut.openItem = nut.openItem===itemId ? null : itemId; render();
+}
+const ENTRY_LABEL = { search:"search", barcode:"barcode scan", label:"label photo", photo:"photo", manual:"quick add", recent:"recent foods", recipe:"recipe" };
 function nHead(title){
   return '<div class="nhead"><button class="nb" onclick="nBack()" aria-label="Back">'+nIcon("back",20)+'</button><h2>'+esc(title)+'</h2></div>';
 }
 function renderFoodAdd(){
   const isRec = nut.target && nut.target.kind==="recipe";
-  const label = isRec ? "Add ingredient" : "Log "+((MEAL_TYPES.find(x=>x[0]===(nut.target||{}).type)||[0,"food"])[1]);
+  const label = isRec ? (nut.recipe && nut.recipe.kind==="meal" ? "Add food" : "Add ingredient") : "Log "+((MEAL_TYPES.find(x=>x[0]===(nut.target||{}).type)||[0,"food"])[1]);
   let h = nHead(label);
   h += '<div class="ntiles"><button class="ntile" onclick="nScanOpen()">'+nIcon("barcode",26)+'Scan barcode</button>'
     +'<button class="ntile" onclick="nLabelOpen()">'+nIcon("label",26)+'Label photo</button>'
@@ -997,18 +1058,20 @@ function renderFoodAdd(){
   }
   h += '<div class="nsearch"><input class="ninput" id="nq" type="search" placeholder="Search foods or type a barcode" onkeydown="if(event.key===\'Enter\')nSearch()" enterkeyhint="search">'
     +'<button class="sibtn" onclick="nSearch()">Search</button></div><div class="nres" id="nres"></div>';
-  if (!isRec) h += '<div class="nseg"><button class="'+(nut.addTab==="recent"?"on":"")+'" onclick="nut.addTab=\'recent\';render()">Recent</button>'
-    +'<button class="'+(nut.addTab==="meals"?"on":"")+'" onclick="nut.addTab=\'meals\';render()">My meals</button></div>';
+  const segB = (k,l)=>'<button class="'+(nut.addTab===k?"on":"")+'" onclick="nut.addTab=\''+k+'\';render()">'+l+'</button>';
+  if (!isRec) h += '<div class="nseg">'+segB("recent","Recent")+segB("meals","Saved meals")+segB("recipes","Recipes")+'</div>';
   else h += '<p class="statline" style="margin:14px 2px 0">Recent</p>';
   h += '<div class="nres">';
-  if (!isRec && nut.addTab==="meals"){
-    if (!nut.recipes.length) h += '<p class="statline">No saved meals yet. Create one under My meals on the Food tab.</p>';
-    nut.recipes.forEach((r,i)=>{ const f = nFromRecipe(r);
-      h += '<button class="nr" onclick="nPickRecipe('+i+')"><div><b>'+esc(r.name)+'</b><span>1 of '+r1(r.servings)+' meals · P '+r0(f.per.p)+' C '+r0(f.per.c)+' F '+r0(f.per.f)+'</span></div><span class="k">'+r0(f.per.kcal)+'</span></button>'; });
+  if (!isRec && (nut.addTab==="meals" || nut.addTab==="recipes")){
+    const wantMeal = nut.addTab==="meals"; let any = false;
+    nut.recipes.forEach((r,i)=>{ if (nIsMealKind(r)!==wantMeal) return; any = true; const f = nFromRecipe(r);
+      h += '<button class="nr" onclick="nPickRecipe('+i+')"><div><b>'+esc(r.name)+'</b><span>'+(wantMeal ? (r.recipe_items||[]).length+' foods' : '1 of '+r1(r.servings)+' servings')+' \u00B7 P '+r0(f.per.p)+' C '+r0(f.per.c)+' F '+r0(f.per.f)+'</span></div><span class="k">'+r0(f.per.kcal)+'</span></button>'; });
+    if (!any) h += '<p class="statline">'+(wantMeal ? 'No saved meals yet. On the Food tab, tap \u2022\u2022\u2022 on a meal you logged and choose Save as a meal.' : 'No recipes yet. Create one under Recipes on the Food tab.')+'</p>';
   } else {
     if (!nut.recent.length) h += '<p class="statline">Foods you log show up here for one-tap re-logging.</p>';
     nut.recent.forEach((r,i)=>{
-      h += '<button class="nr" onclick="nAddRecent('+i+')"><div><b>'+esc(r.name)+'</b><span>'+(r.recipe_id && r.servings ? r1(r.servings)+' meal · ' : r.grams ? r0(r.grams)+' g · ' : '')+'P '+r0(r.protein_g)+' C '+r0(r.carb_g)+' F '+r0(r.fat_g)+'</span></div><span class="k">'+r0(r.kcal)+'</span></button>';
+      const rr = r.recipe_id ? nRecipeById(r.recipe_id) : null;
+      h += '<button class="nr" onclick="nAddRecent('+i+')"><div><b>'+esc(r.name)+'</b><span>'+(r.recipe_id && r.servings ? r1(r.servings)+(rr && !nIsMealKind(rr) ? ' serving' : ' meal')+' \u00B7 ' : r.grams ? r0(r.grams)+' g \u00B7 ' : '')+'P '+r0(r.protein_g)+' C '+r0(r.carb_g)+' F '+r0(r.fat_g)+'</span></div><span class="k">'+r0(r.kcal)+'</span></button>';
     });
   }
   h += '</div>';
@@ -1020,14 +1083,14 @@ function renderFoodPick(){
   const isRec = nut.target && nut.target.kind==="recipe";
   let h = nHead(isRec ? "Add ingredient" : "Log "+((MEAL_TYPES.find(x=>x[0]===(nut.target||{}).type)||[0,"food"])[1]));
   const s = nScaled(f, nut.qty, nut.unit);
-  const unitLabel = f.source==="recipe" ? "meals" : "servings";
+  const unitLabel = f.source==="recipe" && f.kind==="meal" ? "meals" : "servings";
   h += '<div class="ncard"><b style="color:#fff;font-size:18px">'+esc((f.brand && f.source!=="recipe" ? f.brand+" " : "")+f.name)+'</b>'
-    +'<p class="statline" style="margin-top:4px">Serving: '+esc(nServingText(f))+' · '+r0(f.per.kcal)+' cal'+(f.barcode?' · barcode '+esc(f.barcode):'')+'</p>'
+    +'<p class="statline" style="margin-top:4px">Serving: '+esc(nServingText(f))+' \u00B7 '+r0(f.per.kcal)+' cal'+(f.barcode?' \u00B7 barcode '+esc(f.barcode):'')+'</p>'
     +'<div class="nsearch" style="margin-top:12px"><input class="ninput" id="nqty" inputmode="decimal" value="'+esc(nut.qty)+'" oninput="nut.qty=this.value;nPaintPick()" aria-label="Amount">'
     +(f.serving_g && f.source!=="recipe" ? '<div class="nseg" style="margin:0"><button class="'+(nut.unit!=="g"?"on":"")+'" onclick="nSetUnit(\'serving\')">'+unitLabel+'</button><button class="'+(nut.unit==="g"?"on":"")+'" onclick="nSetUnit(\'g\')">grams</button></div>'
       : '<span class="statline" style="margin:0;align-self:center">'+unitLabel+'</span>')+'</div>'
     +'<div class="nmacrow" id="npick">'+nPickCells(s)+'</div>'
-    +'<div class="nbtnrow"><button class="sibtn" onclick="nConfirmPick()">'+(isRec?"Add to meal":"Log it")+'</button></div></div>';
+    +'<div class="nbtnrow"><button class="sibtn" onclick="nConfirmPick()">'+(isRec?(nut.recipe && nut.recipe.kind==="meal"?"Add to meal":"Add to recipe"):"Log it")+'</button></div></div>';
   return h;
 }
 function nPickCells(s){
@@ -1045,7 +1108,7 @@ function renderFoodLabel(){
   const L = nut.label || {};
   let h = nHead("Nutrition label");
   h += '<div class="ncard">';
-  if (L.barcode) h += '<p class="statline" style="margin-top:0">Barcode '+esc(L.barcode)+' wasn’t found. Snap the label and it gets saved under this barcode.</p>';
+  if (L.barcode) h += '<p class="statline" style="margin-top:0">Barcode '+esc(L.barcode)+' wasn\u2019t found. Snap the label and it gets saved under this barcode.</p>';
   if (L.status==="idle" || !L.status){
     h += '<p class="statline" style="margin-top:0">Get the whole Nutrition Facts panel in frame, flat and well lit. Reading happens on your phone, nothing is uploaded.</p>'
       +'<div class="nbtnrow"><button class="sibtn" onclick="nLabelPick(true)">Take photo</button><button class="sibtn" style="background:rgba(255,255,255,.08)" onclick="nLabelPick(false)">Choose photo</button></div>';
@@ -1053,7 +1116,7 @@ function renderFoodLabel(){
   }
   if (L.img) h += '<img class="nimg" src="'+L.img+'" alt="Label photo">';
   if (L.status==="reading"){
-    h += '<p class="statline" id="nlabprog">Reading label… '+(L.progress||0)+'%</p><p class="statline">First scan downloads the reader (about 10 MB), then it’s fast.</p>';
+    h += '<p class="statline" id="nlabprog">Reading label\u2026 '+(L.progress||0)+'%</p><p class="statline">First scan downloads the reader (about 10 MB), then it\u2019s fast.</p>';
     return h + '</div>';
   }
   const F = L.form || {};
@@ -1073,20 +1136,21 @@ function renderFoodLabel(){
 }
 function renderFoodRecipe(){
   const R = nut.recipe; if (!R){ nut.view = null; return renderFood(); }
-  let h = nHead(R.id ? "Edit meal" : "New meal");
-  h += '<div class="ncard"><div class="ngrid" style="margin-top:0"><div class="wide"><label>Name</label><input class="ninput" placeholder="Chicken rice bowls" value="'+esc(R.name)+'" oninput="nut.recipe.name=this.value;nut.recipe._dirty=true"></div>'
-    +'<div class="wide"><label>Makes how many meals</label><input class="ninput" inputmode="decimal" value="'+esc(R.servings)+'" oninput="nut.recipe.servings=this.value;nut.recipe._dirty=true;nPaintRecipeTotals()"></div></div></div>';
+  const isMeal = R.kind==="meal";
+  let h = nHead(isMeal ? (R.id ? "Saved meal" : "Save as a meal") : (R.id ? "Edit recipe" : "New recipe"));
+  h += '<div class="ncard"><div class="ngrid" style="margin-top:0"><div class="wide"><label>Name</label><input class="ninput" placeholder="'+(isMeal?"Usual breakfast":"Chicken rice bowls")+'" value="'+esc(R.name)+'" oninput="nut.recipe.name=this.value;nut.recipe._dirty=true"></div>'
+    +(isMeal ? '' : '<div class="wide"><label>Makes how many servings</label><input class="ninput" inputmode="decimal" value="'+esc(R.servings)+'" oninput="nut.recipe.servings=this.value;nut.recipe._dirty=true;nPaintRecipeTotals()"></div>')+'</div></div>';
   h += '<div class="ncard" id="nrtot">'+nRecipeTotalsHtml()+'</div>';
-  h += '<div class="nsec" style="margin-top:6px"><h2>Ingredients</h2><button onclick="nOpenIngredient()">+ Add</button></div><div class="ncard" style="padding:6px 16px 14px">';
-  if (!R.items.length) h += '<p class="statline">Add every ingredient in the batch: scan barcodes, snap labels, or search. Enter the amount you used of each.</p>';
+  h += '<div class="nsec" style="margin-top:6px"><h2>'+(isMeal?"Foods":"Ingredients")+'</h2><button onclick="nOpenIngredient()">+ Add</button></div><div class="ncard" style="padding:6px 16px 14px">';
+  if (!R.items.length) h += '<p class="statline">'+(isMeal ? 'Add the foods in this meal.' : 'Add every ingredient in the batch: scan barcodes, snap labels, or search. Enter the amount you used of each.')+'</p>';
   R.items.forEach((it,i)=>{
     h += '<div class="nitem"><div class="nn"><b>'+esc(it.name)+'</b><span>P '+r0(it.protein_g)+' C '+r0(it.carb_g)+' F '+r0(it.fat_g)+'</span></div>'
       +'<div class="nm" style="display:flex;align-items:center;gap:6px"><input class="ninput" style="width:74px;min-height:38px;padding:0 8px;text-align:right" inputmode="decimal" value="'+esc(r1(it.qty))+'" onchange="nRecipeQty('+i+',this.value)" aria-label="Amount">'
       +'<span class="statline" style="margin:0;width:22px">'+(it.unit==="g"?"g":"sv")+'</span><span class="num" id="nrk'+i+'" style="min-width:38px">'+r0(it.kcal)+'</span>'
-      +'<button class="delbtn sm" onclick="nRecipeDel('+i+')" aria-label="Remove">✕</button></div></div>';
+      +'<button class="delbtn sm" onclick="nRecipeDel('+i+')" aria-label="Remove">\u2715</button></div></div>';
   });
-  h += '</div><div class="nbtnrow"><button class="sibtn" onclick="nRecipeSave()">Save meal</button>'
-    +'<button class="sibtn" style="background:rgba(255,255,255,.08)" onclick="nRecipeSave(nGuessMealType())">Save and log 1 meal</button>'
+  h += '</div><div class="nbtnrow"><button class="sibtn" onclick="nRecipeSave()">'+(isMeal?"Save meal":"Save recipe")+'</button>'
+    +'<button class="sibtn" style="background:rgba(255,255,255,.08)" onclick="nRecipeSave(nGuessMealType())">'+(isMeal?"Save and log it":"Save and log 1 serving")+'</button>'
     +(R.id?'<button class="silink" onclick="nRecipeDelete()">Delete</button>':'')+'</div>';
   return h;
 }
@@ -1112,7 +1176,7 @@ function nPickMode(k){ nut.draftMode = k; render(); }
 
 function renderFoodGoal(){
   const g = nut.goal, W = nWho(), B = nBody(W.ctx);
-  let h = '<div class="nsec"><h2>Targets</h2></div><div class="panel a">';
+  let h = nSec("targets", "Targets", "", g ? nModeName(g.mode) : "") + '<div class="panel a"'+nHide("targets")+'>';
   if (g && !nut.goalEdit){
     const byCoach = g.set_by && g.set_by!==auth.uid;
     h += '<p class="statline" style="margin:0 0 6px">'+esc(nModeName(g.mode))+' \u00B7 since '+nDate(g.effective_from)+(byCoach?' \u00B7 set by your coach':'')+'</p>'+nRows(g);
@@ -1224,7 +1288,7 @@ async function nUpsertBc(row){
 const BC_LABEL = { dexa:"DEXA", pnoe:"PNOE", estimate:"Body fat est.", scale:"Weigh-in" };
 function renderBodyData(compact){
   const W = nWho(), p = W.prof || {}, age = nAge(p);
-  let h = '<div class="nsec"><h2>Body data</h2><button onclick="nRecOpen()">Upload DEXA, PNOE, labs</button></div><div class="panel a">';
+  let h = nSec("body", "Body data", '<button onclick="nRecOpen()">Upload DEXA, PNOE, labs</button>') + '<div class="panel a"'+nHide("body")+'>';
   if (!compact){
     if (nut.detailsOpen) h += renderDetailsForm();
     else h += '<div class="trow" style="border-top:0;padding-top:0"><span class="d">Details</span><span class="s">'

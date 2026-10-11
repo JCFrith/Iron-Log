@@ -132,6 +132,7 @@ const nut = {
   .nimg { width:100%; max-height:220px; object-fit:contain; border-radius:12px; margin-top:10px; background:#000; }
   .nrec { display:flex; justify-content:space-between; align-items:center; gap:10px; width:100%; text-align:left; padding:14px 16px; margin-bottom:10px; border-radius:18px; border:1px solid var(--border); background:linear-gradient(145deg,rgba(28,28,28,.92),rgba(17,17,17,.88)); color:var(--text); }
   .nrec .nic { color:var(--accent-hi); }
+  .nrec { cursor:pointer; } .nrec > div { min-width:0; } .nrec .delbtn { flex:none; }
   .nrec b { display:block; color:#fff; font-size:16px; } .nrec span { color:var(--dim); font-size:12.5px; }
   .nscan { position:fixed; inset:0; z-index:9999; background:#000; display:flex; flex-direction:column; }
   .nscan video { flex:1; width:100%; object-fit:cover; }
@@ -899,11 +900,19 @@ async function nRecipeSave(thenLog){
   } catch(e){ toast(isMeal ? "Couldn\u2019t save the meal." : "Couldn\u2019t save the recipe."); }
 }
 async function nRecipeDelete(){
-  const R = nut.recipe; if (!R || !R.id){ nut.view=null; nut.recipe=null; render(); return; }
-  if (!confirm("Delete "+R.name+"? Past logs keep their numbers.")) return;
-  try { const r = await sb("/rest/v1/recipes?id=eq."+R.id, { method:"DELETE" }); if (!r.ok) throw new Error();
-    nut.recipes = nut.recipes.filter(x=>x.id!==R.id); nut.view = null; nut.recipe = null; nut.target = null; render(); toast("Deleted."); }
-  catch(e){ toast("Couldn\u2019t delete."); }
+  const R = nut.recipe; if (!R || !R.id){ nut.view=null; nut.recipe=null; nut.target=null; render(); return; }
+  nRecipeDeleteId(R.id);
+}
+async function nRecipeDeleteId(id){
+  const r = nRecipeById(id); if (!r) return;
+  const what = nIsMealKind(r) ? "saved meal" : "recipe";
+  if (!confirm("Delete the "+what+" \u201C"+r.name+"\u201D? Anything you already logged keeps its numbers.")) return;
+  try {
+    const res = await sb("/rest/v1/recipes?id=eq."+id, { method:"DELETE" }); if (!res.ok) throw new Error();
+    nut.recipes = nut.recipes.filter(x=>x.id!==id);
+    if (nut.recipe && nut.recipe.id===id){ nut.view = null; nut.recipe = null; nut.target = null; }
+    render(); toast("Deleted "+r.name+".");
+  } catch(e){ toast("Couldn\u2019t delete."); }
 }
 function nGuessMealType(){
   const h = new Date().getHours();
@@ -999,7 +1008,8 @@ function renderFood(){
   if (!savedMeals.length) h += '<p class="statline" style="margin:0 4px 6px">Log a few foods to Breakfast, Lunch, or any meal, then tap \u2022\u2022\u2022 and Save as a meal to log the whole thing in one tap next time.</p>';
   savedMeals.forEach(r=>{
     const f = nFromRecipe(r);
-    h += '<button class="nrec" onclick="nOpenRecipeId(\''+r.id+'\')"><div><b>'+esc(r.name)+'</b><span class="num">'+(r.recipe_items||[]).length+' foods \u00B7 '+nMacroLine({kcal:f.per.kcal,p:f.per.p,c:f.per.c,f:f.per.f})+'</span></div>'+nIcon("dinner",24)+'</button>';
+    h += '<div class="nrec" role="button" tabindex="0" onclick="nOpenRecipeId(\''+r.id+'\')"><div><b>'+esc(r.name)+'</b><span class="num">'+(r.recipe_items||[]).length+' foods \u00B7 '+nMacroLine({kcal:f.per.kcal,p:f.per.p,c:f.per.c,f:f.per.f})+'</span></div>'
+      +'<button class="delbtn sm" onclick="event.stopPropagation();nRecipeDeleteId(\''+r.id+'\')" aria-label="Delete '+esc(r.name)+'">\u2715</button></div>';
   });
   h += '</div>';
   h += nSec("recipes", "Recipes", '<button onclick="nNewRecipe()">+ New</button>', recipes.length ? String(recipes.length) : "");
@@ -1007,7 +1017,8 @@ function renderFood(){
   if (!recipes.length) h += '<p class="statline" style="margin:0 4px 6px">Build a batch once (every ingredient, how many servings it makes) and log a serving in one tap.</p>';
   recipes.forEach(r=>{
     const f = nFromRecipe(r);
-    h += '<button class="nrec" onclick="nOpenRecipeId(\''+r.id+'\')"><div><b>'+esc(r.name)+'</b><span class="num">Makes '+r1(r.servings)+' \u00B7 per serving '+nMacroLine({kcal:f.per.kcal,p:f.per.p,c:f.per.c,f:f.per.f})+'</span></div>'+nIcon("bowl",24)+'</button>';
+    h += '<div class="nrec" role="button" tabindex="0" onclick="nOpenRecipeId(\''+r.id+'\')"><div><b>'+esc(r.name)+'</b><span class="num">Makes '+r1(r.servings)+' \u00B7 per serving '+nMacroLine({kcal:f.per.kcal,p:f.per.p,c:f.per.c,f:f.per.f})+'</span></div>'
+      +'<button class="delbtn sm" onclick="event.stopPropagation();nRecipeDeleteId(\''+r.id+'\')" aria-label="Delete '+esc(r.name)+'">\u2715</button></div>';
   });
   h += '</div>';
 
@@ -1151,7 +1162,7 @@ function renderFoodRecipe(){
   });
   h += '</div><div class="nbtnrow"><button class="sibtn" onclick="nRecipeSave()">'+(isMeal?"Save meal":"Save recipe")+'</button>'
     +'<button class="sibtn" style="background:rgba(255,255,255,.08)" onclick="nRecipeSave(nGuessMealType())">'+(isMeal?"Save and log it":"Save and log 1 serving")+'</button>'
-    +(R.id?'<button class="silink" onclick="nRecipeDelete()">Delete</button>':'')+'</div>';
+    +'</div>'+(R.id?'<div class="nbtnrow"><button class="sibtn" style="background:rgba(122,32,32,.45);color:var(--danger)" onclick="nRecipeDelete()">Delete '+(isMeal?'saved meal':'recipe')+'</button></div>':'');
   return h;
 }
 // ---------- targets, details, body data (shared by self view and coach view) ----------

@@ -224,11 +224,7 @@ function nRecClose(){ nut.records = false; nut.recUp = null; render(); }
 
 // ---------- upload flow ----------
 function nRecStart(kind){ nut.recUp = { kind, status:"choose", file:null, form:null, rows:[], img:null }; render(); }
-function nRecPick(){
-  const i = document.createElement("input"); i.type = "file"; i.accept = "application/pdf,image/*";
-  i.onchange = ()=>{ const f = i.files && i.files[0]; if (f) nRecFile(f); };
-  i.click();
-}
+function nRecPick(){ nPickFile("application/pdf,image/*", false, nRecFile); }
 function nRecManual(){ const U = nut.recUp; U.status = "review"; nRecBlank(U); render(); }
 function nRecBlank(U){
   if (U.kind==="dexa") U.form = Object.assign({ date:"", wt:"", lean:"", fat:"", bf:"", vat:"", trunk:"", bmc:"" }, U.form||{});

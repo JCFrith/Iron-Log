@@ -176,6 +176,18 @@ function nLoadScript(src, globalName){
   });
   return nScripts[src];
 }
+// iOS Safari can drop the change event of a file input that isn't in the document, so keep it attached.
+function nPickFile(accept, capture, onFile){
+  const old = document.getElementById("nfilepick"); if (old) old.remove();
+  const i = document.createElement("input");
+  i.type = "file"; i.accept = accept; i.id = "nfilepick";
+  if (capture) i.setAttribute("capture", "environment");
+  i.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0";
+  i.addEventListener("change", ()=>{ const f = i.files && i.files[0]; setTimeout(()=>i.remove(), 0); if (f) onFile(f); });
+  document.body.appendChild(i);
+  i.click();
+}
+function nErr(e){ return e ? String(e.name && e.name!=="Error" ? e.name : (e.message || e)).slice(0,80) : "unknown"; }
 function nTitle(s){ return s.length>3 && s===s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()) : s; }
 
 // ---------- goal engine ----------
@@ -521,6 +533,8 @@ function nPaintResults(){
 
 // ---------- barcode scanning ----------
 let nScanCtl = null;
+const NB_FORMATS = [7, 6, 14, 15]; // ZXing BarcodeFormat: EAN_13, EAN_8, UPC_A, UPC_E
+function nZxHints(){ return new Map([[2, NB_FORMATS], [3, true]]); } // DecodeHintType POSSIBLE_FORMATS, TRY_HARDER
 function nScanClose(){
   try { if (nScanCtl && nScanCtl.stop) nScanCtl.stop(); } catch(e){}
   nScanCtl = null;
@@ -528,41 +542,89 @@ function nScanClose(){
   try { if (v && v.srcObject) v.srcObject.getTracks().forEach(t=>t.stop()); } catch(e){}
   const o = document.getElementById("nscan"); if (o) o.remove();
 }
+function nScanMsg(t){ const el = document.getElementById("nscanmsg"); if (el) el.textContent = t; }
 async function nScanOpen(){
   nScanClose();
   const o = document.createElement("div"); o.id = "nscan"; o.className = "nscan";
-  o.innerHTML = '<video playsinline muted autoplay></video><div class="guide"></div><div class="bar">'
+  o.innerHTML = '<video playsinline webkit-playsinline muted autoplay></video><div class="guide"></div><div class="bar">'
     +'<div class="msg" id="nscanmsg">Starting camera…</div>'
+    +'<button class="sibtn" onclick="nScanPhoto()">Snap a photo of the barcode</button>'
     +'<div class="row"><input class="ninput" id="nscancode" inputmode="numeric" placeholder="Or type the barcode number" onkeydown="if(event.key===\'Enter\')nScanTyped()"><button class="sibtn" onclick="nScanTyped()">Look up</button></div>'
     +'<button class="x" onclick="nScanClose()">Cancel</button></div>';
   document.body.appendChild(o);
-  const video = o.querySelector("video"), msg = o.querySelector("#nscanmsg");
-  const done = code => { nScanClose(); nHandleBarcode(code); };
+  const video = o.querySelector("video");
+  const done = code => { if (!document.getElementById("nscan")) return; try { navigator.vibrate && navigator.vibrate(40); } catch(e){} nScanClose(); nHandleBarcode(code); };
+  const tip = "Hold it 6 to 10 inches away, inside the box. Not scanning? Snap a photo.";
+  const constraints = { video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false };
   try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error("no camera API"), { name:"NotSupportedError" });
     if ("BarcodeDetector" in window){
       const det = new window.BarcodeDetector({ formats:["ean_13","ean_8","upc_a","upc_e"] });
-      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"environment" }, audio:false });
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream; await video.play();
-      msg.textContent = "Point at the barcode";
+      nScanFocus(stream); nScanMsg(tip);
       let live = true; nScanCtl = { stop(){ live = false; } };
       const tick = async ()=>{
         if (!live || !document.getElementById("nscan")) return;
         try { const r = await det.detect(video); if (r && r[0] && r[0].rawValue){ done(r[0].rawValue); return; } } catch(e){}
-        setTimeout(tick, 180);
+        setTimeout(tick, 150);
       };
       tick();
       return;
     }
+    nScanMsg("Loading scanner…");
     const ZX = await nLoadScript(LIB_ZXING, "ZXingBrowser");
-    const reader = new ZX.BrowserMultiFormatReader();
-    msg.textContent = "Point at the barcode";
-    nScanCtl = await reader.decodeFromConstraints({ video:{ facingMode:"environment" } }, video, (res)=>{
-      if (res && document.getElementById("nscan")) done(res.getText());
-    });
+    if (!document.getElementById("nscan")) return;
+    const reader = new ZX.BrowserMultiFormatOneDReader(nZxHints(), { delayBetweenScanAttempts:120, delayBetweenScanSuccess:500 });
+    nScanCtl = await reader.decodeFromConstraints(constraints, video, (res)=>{ if (res) done(res.getText()); });
+    if (video.srcObject) nScanFocus(video.srcObject);
+    nScanMsg(tip);
   } catch(e){
-    msg.textContent = (e && e.name==="NotAllowedError") ? "Camera access was denied. Allow it in Settings, or type the number below."
-      : "Camera unavailable here. Type the barcode number below.";
+    const n = e && e.name;
+    nScanMsg(n==="NotAllowedError" ? "Camera access is blocked. Allow it in iPhone Settings, or snap a photo or type the number below."
+      : "Live scan unavailable ("+nErr(e)+"). Snap a photo or type the number below.");
   }
+}
+function nScanFocus(stream){
+  try {
+    const t = stream.getVideoTracks()[0], caps = t.getCapabilities ? t.getCapabilities() : {};
+    if (caps.focusMode && caps.focusMode.includes("continuous")) t.applyConstraints({ advanced:[{ focusMode:"continuous" }] }).catch(()=>{});
+  } catch(e){}
+}
+function nScanPhoto(){
+  nPickFile("image/*", true, async f=>{
+    nScanMsg("Reading barcode…");
+    try { const code = await nDecodeBarcodeFile(f); nScanClose(); nHandleBarcode(code); }
+    catch(e){ nScanMsg(e && e.message==="nocode" ? "Couldn’t find a barcode in that photo. Fill the frame with the barcode, keep it sharp, and try again." : "Couldn’t read that photo ("+nErr(e)+")."); }
+  });
+}
+// Decode UPC/EAN from a still photo: full frame, center strips, and rotated, at a size ZXing handles well.
+async function nDecodeBarcodeFile(file){
+  const { img, url } = await nLoadImage(file);
+  try {
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const tries = [];
+    const add = (sx, sy, sw, sh, rot, max) => tries.push({ sx, sy, sw, sh, rot, max });
+    add(0, 0, W, H, 0, 1400); add(0, 0, W, H, 0, 2200);
+    add(0, H*0.25, W, H*0.5, 0, 1600); add(W*0.1, H*0.35, W*0.8, H*0.3, 0, 1600);
+    add(0, 0, W, H, 90, 1400); add(W*0.25, 0, W*0.5, H, 90, 1600);
+    let det = null;
+    if ("BarcodeDetector" in window){ try { det = new window.BarcodeDetector({ formats:["ean_13","ean_8","upc_a","upc_e"] }); } catch(e){} }
+    if (det){ try { const r = await det.detect(img); if (r && r[0] && r[0].rawValue) return r[0].rawValue; } catch(e){} }
+    const ZX = await nLoadScript(LIB_ZXING, "ZXingBrowser");
+    const reader = new ZX.BrowserMultiFormatOneDReader(nZxHints());
+    for (const t of tries){
+      const sc = Math.min(1, t.max/Math.max(t.sw, t.sh));
+      const cw = Math.round(t.sw*sc), ch = Math.round(t.sh*sc);
+      const c = document.createElement("canvas");
+      c.width = t.rot ? ch : cw; c.height = t.rot ? cw : ch;
+      const x = c.getContext("2d");
+      if (t.rot){ x.translate(c.width/2, c.height/2); x.rotate(Math.PI/2); x.drawImage(img, t.sx, t.sy, t.sw, t.sh, -cw/2, -ch/2, cw, ch); }
+      else x.drawImage(img, t.sx, t.sy, t.sw, t.sh, 0, 0, cw, ch);
+      try { const r = reader.decodeFromCanvas(c); if (r && r.getText()) return r.getText(); } catch(e){}
+    }
+    throw new Error("nocode");
+  } finally { try { URL.revokeObjectURL(url); } catch(e){} }
 }
 function nScanTyped(){ const el = document.getElementById("nscancode"); const v = el ? el.value.replace(/\D/g,"") : ""; if (v.length<8){ toast("Barcodes are 8 to 14 digits."); return; } nScanClose(); nHandleBarcode(v); }
 function nCodeVariants(code){
@@ -601,15 +663,10 @@ async function nHandleBarcode(code){
 
 // ---------- nutrition label photo (on-device OCR) ----------
 function nLabelOpen(){ nut.label = { status:"idle", barcode:null, form:null, img:null }; nut.view = "label"; render(); }
-function nLabelPick(capture){
-  const i = document.createElement("input"); i.type = "file"; i.accept = "image/*";
-  if (capture) i.setAttribute("capture","environment");
-  i.onchange = ()=>{ const f = i.files && i.files[0]; if (f) nLabelRun(f); };
-  i.click();
-}
+function nLabelPick(capture){ nPickFile("image/*", capture, nLabelRun); }
 async function nLoadImage(file){
   const url = URL.createObjectURL(file);
-  const img = await new Promise((res, rej)=>{ const im = new Image(); im.onload = ()=>res(im); im.onerror = rej; im.src = url; });
+  const img = await new Promise((res, rej)=>{ const im = new Image(); im.onload = ()=>res(im); im.onerror = ()=>rej(new Error("image format not supported")); im.src = url; });
   return { img, url };
 }
 // Grayscale + binarize. mode "otsu" (global) or "adaptive" (local mean), long side scaled to `target`.
@@ -643,7 +700,7 @@ function nPrepCanvas(img, target, mode){
 let nOcrWorker = null;
 async function nLabelRun(file){
   const L = nut.label || (nut.label = { barcode:null });
-  L.status = "reading"; L.progress = 0; L.img = null; render();
+  L.status = "reading"; L.progress = 0; L.img = null; L.error = null; render();
   const texts = [];
   try {
     const { img, url } = await nLoadImage(file);
@@ -664,7 +721,10 @@ async function nLabelRun(file){
     if (found<4 || (L.form._est||[]).length || (L.form._check||[]).length) toast("Check the highlighted numbers against the photo.");
   } catch(e){
     L.status = "review"; L.form = L.form || nParseLabel([]);
-    toast("Couldn\u2019t read that photo. Enter the numbers from the label.");
+    L.error = nErr(e);
+    try { if (nOcrWorker) { nOcrWorker.terminate(); } } catch(_){}
+    nOcrWorker = null;
+    toast("Couldn\u2019t read that photo ("+L.error+"). Enter the numbers from the label.");
   }
   if (nut.view==="label") render();
 }
@@ -997,6 +1057,7 @@ function renderFoodLabel(){
     return h + '</div>';
   }
   const F = L.form || {};
+  if (L.error) h += '<div class="nwarn">The label reader failed: '+esc(L.error)+'. Type the numbers in below.</div>';
   const est = F._est || [], chk = F._check || [];
   const fld = (k, lab, wide, mode)=>{ const missing = ["kcal","fat","carb","protein"].includes(k) && !F[k];
     const e = est.includes(k) || chk.includes(k) || missing;

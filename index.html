@@ -2095,10 +2095,11 @@ Object.values(LIB).forEach(list=>list.forEach(n=>{ LIBNAME[slug(n)] = n; }));
 const BUILTIN_SCHEDULE = {1:"A",2:"C",3:"B",4:"C",5:["A","B"],6:null,0:null};
 let WORKOUTS, SCHEDULE;
 let PROG_REST = 0;
+let WEEKLY_PROG = false;   // program opt-in: repeated lifts progress only on their first session of the week
 function applyProgram(p){
   _planCache = Object.create(null); _planStamp = null; _pfCache = Object.create(null); _pfStamp = null;   // program data changed \u2014 plans must recompute
   if (!p || !p.workouts){
-    WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; PROG_REST = 0; programName = "";
+    WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; PROG_REST = 0; WEEKLY_PROG = false; programName = "";
     if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
     return;
   }
@@ -2118,6 +2119,7 @@ function applyProgram(p){
   WEEK_TARGET = p.weekTarget || 5;
   DELOAD_EVERY = (p.deloadEvery===0) ? 0 : (p.deloadEvery || 7);
   PROG_REST = Number(p.rest) || 0;
+  WEEKLY_PROG = !!p.weeklyProgression;
   // Snap to today's scheduled workout for THIS program's schedule. The boot-time pick
   // (line ~3422) used the builtin schedule and may be stale; recompute unless a same-day
   // draft explicitly selected a workout (handled in restoreDraft, which runs after this).
@@ -2156,7 +2158,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "15.1";
+const APP_VERSION = "15.2";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3554,6 +3556,24 @@ function lastEntryFor(exId){
   }
   return null;
 }
+// Weekly progression helpers: entries grouped by training week, oldest first within a week.
+function entriesByWeek(exId){
+  const by = {};
+  for (const s of sessions){
+    if (!sameProg(s)) continue;
+    const sets = workSets(s.entries && s.entries[exId]);
+    if (!sets || !sets.some(x=>x.r>0)) continue;
+    const k = weekKey(s.date);
+    (by[k] = by[k] || []).push({sets:sets.filter(x=>x.r>0), date:s.date});
+  }
+  for (const k in by) by[k].sort((a,b)=>a.date<b.date?-1:1);
+  return by;
+}
+// First session of each week for a lift, newest week first.
+function firstOfWeekHistory(exId, n){
+  const by = entriesByWeek(exId);
+  return Object.keys(by).sort().reverse().slice(0, n).map(k=>by[k][0]);
+}
 function historyFor(exId, n){
   const out=[];
   for (let i=sessions.length-1;i>=0 && out.length<n;i--){
@@ -3598,7 +3618,22 @@ function planFor(e){
   return (_pfCache[e.id] = _planForRaw(e));
 }
 function _planForRaw(e){
-  const last = lastEntryFor(e.id);
+  let last = lastEntryFor(e.id);
+  if (WEEKLY_PROG && last){
+    const by = entriesByWeek(e.id);
+    const today = new Date(); const todayK = weekKey(today.toISOString()); const todayD = today.toDateString();
+    const wkFirst = (by[todayK]||[]).find(x=>new Date(x.date).toDateString()!==todayD);
+    if (wkFirst && !deloadActive()){
+      // already trained this lift earlier this week: hold that session's working weight
+      const topW = Math.max(...wkFirst.sets.map(s=>s.w||0));
+      const n = Math.max(e.sets, 1);
+      return {mode:"hold", last:wkFirst, topW, bw:!!e.bw,
+        sets:Array.from({length:n},()=>({w: e.bw?0:topW, r:e.min}))};
+    }
+    // first session of the week: progress off the most recent prior week's first session
+    const prior = Object.keys(by).filter(k=>k<todayK).sort();
+    if (prior.length) last = by[prior[prior.length-1]][0];
+  }
   if (!last) return {mode:"baseline", sets:null, last:null};
   const topW = Math.max(...last.sets.map(s=>s.w||0));
   if (deloadActive()){
@@ -3688,7 +3723,7 @@ function groupSetsPanel(){
   return h;
 }
 function isStalled(exId){
-  const h = historyFor(exId, 3);
+  const h = WEEKLY_PROG ? firstOfWeekHistory(exId, 3) : historyFor(exId, 3);
   if (h.length < 3) return false;
   const tops = h.map(x=>Math.max(...x.sets.map(s=>s.w)));
   if (!(tops[0]===tops[1] && tops[1]===tops[2])) return false;
@@ -4233,19 +4268,21 @@ function renderTrain(){
       +'</button>'
       +(e.bw?'':'<button class="notebtn" onclick="openPlatesFor(\''+e.id+'\')" aria-label="plates for '+esc(e.name)+'"><svg width="17" height="11" viewBox="0 0 22 12" fill="currentColor"><rect x="0" y="3" width="2.5" height="6" rx="1"/><rect x="3.5" y="1" width="3" height="10" rx="1"/><rect x="15.5" y="1" width="3" height="10" rx="1"/><rect x="19.5" y="3" width="2.5" height="6" rx="1"/><rect x="6.5" y="5" width="9" height="2" rx="1"/></svg></button>')
       +'<button class="notebtn'+((noteDrafts[e.id]&&noteDrafts[e.id].trim())||noteOpen===e.id?" on":"")+'" onclick="toggleNote(\''+e.id+'\')" aria-label="note for '+esc(e.name)+'">\u270E</button>'
-      +((plan.mode==="deload"||plan.mode==="add"||plan.mode==="beat") ? '<span class="explan num'+(plan.mode==="add"?" hot":"")+'">'
-      +(plan.mode==="deload" ? "deload" : plan.mode==="add" ? "\u25B2 +"+INC+" lb" : "beat "+plan.last.sets.map(s=>s.r).join("/"))
+      +((plan.mode==="deload"||plan.mode==="add"||plan.mode==="beat"||plan.mode==="hold") ? '<span class="explan num'+(plan.mode==="add"?" hot":"")+'">'
+      +(plan.mode==="deload" ? "deload" : plan.mode==="add" ? "\u25B2 +"+INC+" lb" : plan.mode==="hold" ? (e.bw ? "hold" : "hold "+plan.topW) : "beat "+plan.last.sets.map(s=>s.r).join("/"))
       +'</span>' : '')+'</div>';
     // coach box
     const adv = (plan.mode==="add"||plan.mode==="beat") ? recAdvice() : null;
     h += '<div class="coach'+(plan.mode==="add"?" add":plan.mode==="deload"?" dl":"")+(adv?" rec"+adv.lvl:"")+'"><span class="coachlbl">Coach</span>'
-      +'<span class="tchip">'+(plan.mode==="add"?"\u25B2 Add weight":plan.mode==="beat"?"Beat last":plan.mode==="deload"?"Deload":"Baseline")+'</span>'
+      +'<span class="tchip">'+(plan.mode==="add"?"\u25B2 Add weight":plan.mode==="beat"?"Beat last":plan.mode==="deload"?"Deload":plan.mode==="hold"?"Hold weight":"Baseline")+'</span>'
       +(adv?'<span class="tchip rec '+adv.lvl+'">'+adv.chip+'</span>':'')
       +'<p class="coachcopy">'+esc(
         plan.mode==="deload" ? (e.bw ? "Deload \u2014 easy sets of "+e.min+", stop far from failure."
           : "Deload \u2014 half load: "+plan.sets[0].w+" lb \u00D7 "+e.min+". Stop 4\u20135 reps shy of failure.")
         : plan.mode==="add" ? (e.bw ? "Maxed the range every set. Push past "+e.max+" "+(e.unit==="sec"?"seconds":"reps")+" or add load."
           : "Hit "+e.max+"+ on all sets last time. Load "+plan.sets[0].w+" lb, target "+e.min+"\u2013"+e.max+" reps.")
+        : plan.mode==="hold" ? (e.bw ? "Repeat this week \u2014 match the range ("+(e.min===e.max?e.min:e.min+"\u2013"+e.max)+" "+(e.unit==="sec"?"seconds":"reps")+"). Progression happens on your first session of the week."
+          : "Repeat this week \u2014 hold "+plan.topW+" lb from "+new Date(plan.last.date).toLocaleDateString(undefined,{weekday:"long"})+", "+(e.min===e.max?e.min:e.min+"\u2013"+e.max)+" crisp reps. Weight only goes up on your first session of the week.")
         : plan.mode==="beat" ? (e.bw ? "Beat last: "+plan.last.sets.map(s=>s.r).join(" / ")+" \u2192 "+plan.sets.map(s=>s.r).join(" / ")+"."
           : "Stay at "+plan.topW+" lb. Beat last: "+plan.last.sets.map(s=>s.r).join(" / ")+" \u2192 "+plan.sets.map(s=>s.r).join(" / ")+".")
         : "First session \u2014 set a baseline you can hit for "+e.min+"\u2013"+e.max+" clean "+(e.unit==="sec"?"seconds":"reps")+".")+'</p>'+(adv?'<p class="coachrec '+adv.lvl+'">'+esc(adv.copy)+'</p>':'')+'';

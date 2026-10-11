@@ -1163,7 +1163,7 @@ async function nUpsertBc(row){
 const BC_LABEL = { dexa:"DEXA", pnoe:"PNOE", estimate:"Body fat est.", scale:"Weigh-in" };
 function renderBodyData(compact){
   const W = nWho(), p = W.prof || {}, age = nAge(p);
-  let h = '<div class="nsec"><h2>Body data</h2>'+(nut.bcForm?'':'<button onclick="nBcNew()">+ Add</button>')+'</div><div class="panel a">';
+  let h = '<div class="nsec"><h2>Body data</h2><button onclick="nRecOpen()">Upload DEXA, PNOE, labs</button></div><div class="panel a">';
   if (!compact){
     if (nut.detailsOpen) h += renderDetailsForm();
     else h += '<div class="trow" style="border-top:0;padding-top:0"><span class="d">Details</span><span class="s">'
@@ -1172,7 +1172,7 @@ function renderBodyData(compact){
   }
   if (nut.bcForm) h += renderBcForm();
   const rows = (W.bc||[]).filter(r=>r.method!=="scale").slice(0,8);
-  if (!rows.length && !nut.bcForm) h += '<p class="statline">Add a DEXA scan, PNOE resting burn, or a body fat % estimate. The newest one drives your targets.</p>';
+  if (!rows.length && !nut.bcForm) h += '<p class="statline">No scans yet. Upload a DEXA or PNOE report under Health records, or add a body fat % estimate there. The newest one drives your targets.</p>';
   rows.forEach(r=>{
     const parts = [];
     if (r.weight_lb) parts.push(r1(r.weight_lb)+" lb");
@@ -1345,5 +1345,6 @@ function renderCoachNutrition(){
   const B = nBody(nCtxCoach());
   if (B.missing.length && !nut.detailsOpen){ nut.detailsOpen = true; nut.details = null; }
   h += renderBodyData();
+  h += '<div class="nbtnrow"><button class="sibtn" onclick="nut.records=true;nut.rec=null;render();nRecLoad()">'+first+'\u2019s health records</button></div>';
   return h;
 }

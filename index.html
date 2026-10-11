@@ -2065,7 +2065,8 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=15.5"></script>
+<script src="nutrition.js?v=15.6"></script>
+<script src="records.js?v=15.6"></script>
 <script>
 
 "use strict";
@@ -2162,7 +2163,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "15.5";
+const APP_VERSION = "15.6";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3235,6 +3236,7 @@ function renderMenu(){
   for (const [k,nm] of Object.entries(THEMES))
     h += '<button class="themebtn'+(k===theme?" on":"")+'" onclick="setTheme(\''+k+'\')"><span class="sw sw-'+k+'"></span>'+nm+'</button>';
   h += '</div>';
+  if (auth) h += '<button class="menuitem" onclick="menuOpen=false;nRecOpen()">Health records: DEXA, PNOE, labs</button>';
   h += '<button class="menuitem" onclick="toggleTut()">How Iron Log works</button>';
   if (auth) h += (whoopRec
     ? '<button class="menuitem" onclick="whoopResync()">Re-sync WHOOP now</button>'
@@ -3925,6 +3927,7 @@ function findEx(exId){
 // ================= Render =================
 function setTab(t){
   tab=t; adjustOpen=null; if (t!=="coach"){ coachView=null; if (typeof nut!=="undefined") nut.coachUid=null; }
+  if (typeof nut!=="undefined" && !nut._keepRecords){ nut.records=false; nut.recUp=null; }
   ["train","food","progress","coach"].forEach(x=>{
     const b=document.getElementById("tab-"+x);
     if (b) b.className = (x===t?"on":"");
@@ -3952,7 +3955,8 @@ function render(){
   m.classList.toggle("noanim", lastTabRendered===tab);
   lastTabRendered = tab;
   m.innerHTML = ((!auth && !localOnly) ? renderWelcome()
-    : tab==="train" ? renderTrain() : tab==="food" ? (typeof renderFood==="function" ? renderFood() : "") : tab==="coach" ? renderCoach() : renderProgress())
+    : tab==="train" ? renderTrain() : tab==="food" ? (typeof renderFood==="function" ? renderFood() : "") : tab==="coach" ? renderCoach()
+    : (typeof nut!=="undefined" && nut.records && typeof renderRecords==="function") ? renderRecords() : renderProgress())
     + (menuOpen ? renderMenu() : "") + (plateOpen ? renderPlates() : "") + (tutOpen ? renderTut() : "") + (fbOpen ? renderFeedback() : "")
     + (histEdit ? renderHistEdit() : "") + (actOpen ? renderActivity() : "");
   const ovKey = [menuOpen,plateOpen,tutOpen,fbOpen,!!histEdit,actOpen].map(Number).join("");
@@ -4931,6 +4935,7 @@ function renderProgress(){
     } else h += '<p class="statline">Log bodyweight after your morning weigh-in \u2014 the trend beside your volume tells the whole story.</p>';
   }
   h += '</div>';
+  if (typeof renderRecordsCard==="function") h += renderRecordsCard();
   const S = summaryStats(30);
   h += '<h2 class="sect disp a">Last 30 days</h2>';
   h += '<div class="panel a"><div class="bmetrics" style="margin:0 0 10px">'
@@ -5142,7 +5147,7 @@ function renderAthleteDetail(){
 function renderCoach(){
   if (!coachData) return '<div class="panel a"><p class="empty">Loading roster\u2026</p></div>';
   if (progEdit) return renderProgEdit();
-  if (typeof nut!=="undefined" && nut.coachUid) return renderCoachNutrition();
+  if (typeof nut!=="undefined" && nut.coachUid) return nut.records ? renderRecords() : renderCoachNutrition();
   if (coachView) return renderAthleteDetail();
   let h = "";
   {

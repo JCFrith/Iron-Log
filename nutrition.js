@@ -35,7 +35,10 @@ const NI = { // stroke icons, 24 viewBox, inherit currentColor
 const nIcon = (k, s) => '<svg class="nic" width="'+(s||22)+'" height="'+(s||22)+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(NI[k]||"")+'</svg>';
 
 const nut = {
-  day: null, meals: [], goal: null, dexa: null, pnoe: null, recent: [], recipes: [], week: {},
+  day: null, meals: [], goal: null, bc: [], recent: [], recipes: [], week: {},
+  details: null,         // draft {sex, birth_year, ft, inch, wt, bf}
+  bcForm: null,          // draft body comp entry
+  coachUid: null, coach: null, // coach nutrition view
   loadedFor: null, weekFor: null, loading: false,
   view: null,            // null | add | pick | label | recipe
   target: null,          // {kind:"meal", type} | {kind:"recipe"}
@@ -176,51 +179,95 @@ function nLoadScript(src, globalName){
 function nTitle(s){ return s.length>3 && s===s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()) : s; }
 
 // ---------- goal engine ----------
-// Inputs: latest DEXA lean mass, measured RMR (PNOE), WHOOP daily calories split by training vs rest days.
-function nComputeGoal(mode){
-  const why = [];
-  const lean = nut.dexa && nut.dexa.lean_mass_lb ? +nut.dexa.lean_mass_lb : null;
-  const wt = nut.dexa && nut.dexa.weight_lb ? +nut.dexa.weight_lb
-    : (typeof whoopBody!=="undefined" && whoopBody && whoopBody.weight_kg ? whoopBody.weight_kg*2.2046 : null);
-  let rmr = nut.pnoe && nut.pnoe.rmr_kcal ? +nut.pnoe.rmr_kcal : null;
-  if (rmr) why.push("RMR "+rmr+" kcal (PNOE "+nDate(nut.pnoe.measured_on)+")");
-  else if (lean){ rmr = Math.round(370 + 21.6*(lean/2.2046)); why.push("RMR "+rmr+" kcal (Katch-McArdle from DEXA lean mass)"); }
-  else if (wt){ rmr = Math.round(wt*11); why.push("RMR "+rmr+" kcal (bodyweight estimate, no DEXA or PNOE on file)"); }
-  else { rmr = 2000; why.push("RMR 2000 kcal default. Add a DEXA or PNOE result for real numbers."); }
+// A context carries everything one person's targets depend on, so the same engine runs for the
+// signed-in user and for an athlete in the coach view.
+// ctx = { prof:{sex,birth_year,height_in}, metrics:[{date,w}], bc:[body_comp rows], days:[whoop_days], whoopKg, isTrain(day) }
+function nCtxSelf(){
+  return { prof: (typeof profile!=="undefined" && profile) || {}, metrics: (typeof metrics!=="undefined" ? metrics : []),
+    bc: nut.bc || [], days: (typeof whoopDays!=="undefined" ? whoopDays : []),
+    whoopKg: (typeof whoopBody!=="undefined" && whoopBody && whoopBody.weight_kg) ? +whoopBody.weight_kg : null,
+    isTrain: nIsTrainingDay };
+}
+function nAge(prof){ return prof && prof.birth_year ? new Date().getFullYear() - prof.birth_year : null; }
+function nLatest(rows, pred){ return (rows||[]).filter(pred).sort((x,y)=>x.measured_on<y.measured_on?1:-1)[0] || null; }
+// Resolve body numbers with their sources. Newest bodyweight wins between Iron Log weigh-ins and scans.
+function nBody(ctx){
+  const out = { src:{} };
+  const dexa = nLatest(ctx.bc, r=>r.method==="dexa" && r.lean_mass_lb);
+  const pnoe = nLatest(ctx.bc, r=>r.method==="pnoe" && r.rmr_kcal);
+  const est = nLatest(ctx.bc, r=>(r.method==="estimate"||r.method==="scale") && r.body_fat_pct);
+  const m = (ctx.metrics||[]).filter(x=>x && +x.w>0).sort((x,y)=>x.date<y.date?1:-1)[0] || null;
+  const mDay = m ? String(m.date).slice(0,10) : null;
+  const scanW = nLatest(ctx.bc, r=>+r.weight_lb>0);
+  if (m && (!scanW || mDay >= scanW.measured_on)){ out.wt = +m.w; out.src.wt = "weigh-in "+nDate(mDay); }
+  else if (scanW){ out.wt = +scanW.weight_lb; out.src.wt = (scanW.method==="dexa"?"DEXA ":"entry ")+nDate(scanW.measured_on); }
+  else if (ctx.whoopKg){ out.wt = r1(ctx.whoopKg*2.2046); out.src.wt = "WHOOP profile"; }
+  if (dexa){ out.lean = +dexa.lean_mass_lb; out.src.lean = "DEXA "+nDate(dexa.measured_on); }
+  else if (est && out.wt){ out.lean = r1(out.wt*(1 - est.body_fat_pct/100)); out.src.lean = est.body_fat_pct+"% body fat estimate"; }
+  out.pnoe = pnoe; out.dexa = dexa;
+  const p = ctx.prof || {};
+  out.missing = [];
+  if (!out.lean){ if (!p.sex) out.missing.push("sex"); if (!p.birth_year) out.missing.push("age"); if (!p.height_in) out.missing.push("height"); }
+  if (!out.wt) out.missing.push("weight");
+  return out;
+}
+function nComputeGoal(mode, ctx){
+  ctx = ctx || nCtxSelf();
+  const why = [], B = nBody(ctx), p = ctx.prof || {}, age = nAge(p);
+  const lean = B.lean || null, wt = B.wt || null;
+  if (wt) why.push("Weight "+r1(wt)+" lb ("+B.src.wt+")");
+
+  let rmr = null;
+  if (B.pnoe){ rmr = +B.pnoe.rmr_kcal; why.push("Resting burn "+rmr+" kcal (PNOE "+nDate(B.pnoe.measured_on)+")"); }
+  else if (lean){ rmr = Math.round(370 + 21.6*(lean/2.2046)); why.push("Resting burn "+rmr+" kcal (Katch-McArdle, lean mass "+r1(lean)+" lb from "+B.src.lean+")"); }
+  else if (wt && p.sex && age && p.height_in){
+    rmr = Math.round(10*(wt/2.2046) + 6.25*(p.height_in*2.54) - 5*age + (p.sex==="male" ? 5 : -161));
+    why.push("Resting burn "+rmr+" kcal (Mifflin-St Jeor: "+p.sex+", "+age+" yr, "+r0(p.height_in)+" in)");
+  }
+  else if (wt){ rmr = Math.round(wt*11); why.push("Resting burn "+rmr+" kcal (rough bodyweight estimate; add your details for a real number)"); }
+  else { rmr = 2000; why.push("Resting burn 2000 kcal placeholder. Add your details to get real targets."); }
 
   const today = dayKey();
-  const days = (typeof whoopDays!=="undefined" ? whoopDays : []).filter(d=>d && d.calories>0 && d.day<today).slice(-28);
+  const days = (ctx.days||[]).filter(d=>d && d.calories>0 && d.day<today).slice(-28);
   const tr = [], rs = [];
-  days.forEach(d=>{ (nIsTrainingDay(d.day) ? tr : rs).push(+d.calories); });
+  days.forEach(d=>{ (ctx.isTrain(d.day) ? tr : rs).push(+d.calories); });
   const avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
   let tdeeT = avg(tr), tdeeR = avg(rs);
-  const floor = rmr*1.2;
-  if (tr.length>=4 && rs.length>=3) why.push("Burn from WHOOP: "+r0(tdeeT)+" training / "+r0(tdeeR)+" rest ("+days.length+" days)");
+  if (tr.length>=4 && rs.length>=3) why.push("Daily burn from WHOOP: "+r0(tdeeT)+" training / "+r0(tdeeR)+" rest ("+days.length+" days)");
   else if (days.length>=5){ const all = avg(days.map(d=>+d.calories)); tdeeT = all*1.06; tdeeR = all*0.92;
-    why.push("Burn from WHOOP average "+r0(all)+" kcal, split estimated (not enough of each day type yet)"); }
-  else { tdeeT = rmr*1.55; tdeeR = rmr*1.35; why.push("Burn estimated from RMR (no recent WHOOP calories)"); }
+    why.push("Daily burn from WHOOP average "+r0(all)+" kcal, split estimated"); }
+  else { tdeeT = rmr*1.55; tdeeR = rmr*1.35; why.push("Daily burn estimated from resting burn (no WHOOP): x1.55 training, x1.35 rest"); }
+  const floor = rmr*1.2;
   tdeeT = Math.max(tdeeT, floor); tdeeR = Math.max(tdeeR, floor);
 
   const adj = { cut:[-400,-500], recomp:[0,-250], maintain:[0,0], lean_gain:[350,150], clinical_hold:[0,0] }[mode] || [0,0];
-  const kcalT = Math.round((tdeeT+adj[0])/10)*10, kcalR = Math.round((tdeeR+adj[1])/10)*10;
-  if (adj[0]||adj[1]) why.push("Mode adjustment: "+(adj[0]>=0?"+":"")+adj[0]+" training / "+(adj[1]>=0?"+":"")+adj[1]+" rest");
+  const minK = Math.round(rmr*1.1/10)*10;
+  let kcalT = Math.round((tdeeT+adj[0])/10)*10, kcalR = Math.round((tdeeR+adj[1])/10)*10;
+  if (adj[0]||adj[1]) why.push("Goal adjustment: "+(adj[0]>=0?"+":"")+adj[0]+" training / "+(adj[1]>=0?"+":"")+adj[1]+" rest");
+  if (kcalT<minK || kcalR<minK){ kcalT = Math.max(kcalT,minK); kcalR = Math.max(kcalR,minK); why.push("Raised to the floor of "+minK+" kcal (resting burn + 10%)"); }
 
   let protein, cap = null;
-  if (lean){ protein = Math.round(lean * (mode==="cut" ? 1.1 : 1.0)); why.push("Protein "+(mode==="cut"?"1.1":"1.0")+" g per lb DEXA lean mass ("+r1(lean)+" lb)"); }
-  else if (wt){ protein = Math.round(wt*0.8); why.push("Protein 0.8 g per lb bodyweight (no DEXA)"); }
-  else protein = 160;
+  const perLb = mode==="cut" ? 1.1 : 1.0;
+  if (lean){ protein = Math.round(lean*perLb); why.push("Protein "+perLb+" g per lb lean mass"); }
+  else if (wt){
+    let base = wt, note = "bodyweight";
+    if (p.height_in){ const bmi = (wt/2.2046)/Math.pow(p.height_in*0.0254,2);
+      if (bmi>30){ base = r0(27*Math.pow(p.height_in*0.0254,2)*2.2046); note = "adjusted weight "+base+" lb (BMI over 30)"; } }
+    const k = mode==="cut" ? 0.9 : 0.8;
+    protein = Math.round(base*k); why.push("Protein "+k+" g per lb "+note+" (no body fat data)");
+  } else protein = 140;
   if (mode==="clinical_hold"){
     cap = Math.round(((wt||200)/2.2046)*1.6);
     if (protein > cap) protein = cap;
     why.push("Clinical hold: maintenance calories, protein capped at "+cap+" g (1.6 g/kg). Confirm the cap with your provider.");
   }
-  const fat = Math.round((kcalR*0.28)/9);
+  const fat = Math.max(Math.round((kcalR*0.28)/9), wt ? Math.round(wt*0.3) : 0);
   const carbT = Math.max(0, Math.round((kcalT - protein*4 - fat*9)/4));
   const carbR = Math.max(0, Math.round((kcalR - protein*4 - fat*9)/4));
-  why.push("Fat 28% of rest-day calories; carbs fill the rest, higher on training days");
+  why.push("Fat 28% of rest-day calories (at least 0.3 g per lb); carbs fill the rest");
   return { mode, kcal_train:kcalT, kcal_rest:kcalR, protein_g:protein, carb_g_train:carbT, carb_g_rest:carbR, fat_g:fat, protein_cap_g:cap,
-    inputs:{ rmr, lean_lb:lean, weight_lb:wt, tdee_train:r0(tdeeT), tdee_rest:r0(tdeeR), whoop_days:days.length,
-             dexa_date: nut.dexa ? nut.dexa.measured_on : null, pnoe_date: nut.pnoe ? nut.pnoe.measured_on : null, why } };
+    inputs:{ rmr, lean_lb:lean, weight_lb:wt, tdee_train:r0(tdeeT), tdee_rest:r0(tdeeR), whoop_days:days.length, missing:B.missing,
+             dexa_date: B.dexa ? B.dexa.measured_on : null, pnoe_date: B.pnoe ? B.pnoe.measured_on : null, why } };
 }
 function nTargetsFor(day){
   const g = nut.goal; if (!g) return null;
@@ -243,16 +290,14 @@ async function nLoad(force){
       sb("/rest/v1/nutrition_daily?select=eaten_on,kcal&user_id=eq."+uid+"&eaten_on=gte."+wk[0]+"&eaten_on=lte."+wk[6]),
     ];
     if (needStatic) reqs.push(
-      sb("/rest/v1/body_comp?select=*&user_id=eq."+uid+"&order=measured_on.desc&limit=20"),
+      sb("/rest/v1/body_comp?select=*&user_id=eq."+uid+"&order=measured_on.desc&limit=40"),
       sb("/rest/v1/meal_items?select=name,food_id,recipe_id,servings,grams,kcal,protein_g,carb_g,fat_g,fiber_g&user_id=eq."+uid+"&order=created_at.desc&limit=60"),
       sb("/rest/v1/recipes?select=*,recipe_items(*)&user_id=eq."+uid+"&order=updated_at.desc"));
     const [m, g, w, bc, rc, rp] = await Promise.all(reqs);
     if (m.ok){ nut.meals = await m.json(); nut.meals.forEach(x=>(x.meal_items||[]).sort((a,b)=>a.created_at<b.created_at?-1:1)); }
     if (g.ok){ const rows = await g.json(); nut.goal = rows[0]||null; }
     if (w.ok){ nut.week = {}; (await w.json()).forEach(r=>{ nut.week[r.eaten_on] = +r.kcal; }); }
-    if (bc && bc.ok){ const rows = await bc.json();
-      nut.dexa = rows.find(r=>r.method==="dexa" && r.lean_mass_lb) || null;
-      nut.pnoe = rows.find(r=>r.method==="pnoe" && r.rmr_kcal) || null; }
+    if (bc && bc.ok) nut.bc = await bc.json();
     if (rc && rc.ok){ const rows = await rc.json(), seen = {};
       nut.recent = rows.filter(r=>{ const k=r.name.toLowerCase(); if (seen[k]) return false; seen[k]=1; return true; }).slice(0,12); }
     if (rp && rp.ok){ nut.recipes = await rp.json(); nut.recipes.forEach(r=>(r.recipe_items||[]).sort((a,b)=>a.position-b.position)); }
@@ -403,18 +448,6 @@ async function nClearMeal(type){
   try { const r = await sb("/rest/v1/meals?id=eq."+m.id, { method:"DELETE" }); if (!r.ok) throw new Error(); }
   catch(e){ nut.meals.push(m); nSyncWeek(); render(); toast("Couldn’t clear."); }
 }
-async function nSaveGoal(){
-  const g = nComputeGoal(nut.draftMode || (nut.goal && nut.goal.mode) || "maintain");
-  const body = Object.assign({ user_id:auth.uid, effective_from:dayKey(), set_by:auth.uid }, g);
-  try {
-    const r = await sb("/rest/v1/nutrition_goals?on_conflict=user_id,effective_from", { method:"POST",
-      headers:{ Prefer:"resolution=merge-duplicates,return=representation" }, body });
-    if (!r.ok) throw new Error(r.status);
-    nut.goal = (await r.json())[0]; nut.goalEdit = false; nut.draftMode = null;
-    toast("Targets saved."); render();
-  } catch(e){ toast("Couldn’t save targets."); }
-}
-
 // ---------- add flow ----------
 function nOpenAdd(type){ nut.target = { kind:"meal", type }; nut.view = "add"; nut.addTab = "recent"; nut.results = []; nut.menuFor = null; render();
   try { scrollTo({top:0}); } catch(e){} }
@@ -996,38 +1029,321 @@ function renderFoodRecipe(){
     +(R.id?'<button class="silink" onclick="nRecipeDelete()">Delete</button>':'')+'</div>';
   return h;
 }
+// ---------- targets, details, body data (shared by self view and coach view) ----------
+// "Who" the forms act on: the signed-in user, or the athlete open in the coach view.
+function nWho(){
+  if (nut.coachUid && nut.coach) return { uid:nut.coach.uid, self:false, prof:nut.coach.prof, bc:nut.coach.bc, ctx:nCtxCoach() };
+  return { uid:auth.uid, self:true, prof:(typeof profile!=="undefined" && profile)||{}, bc:nut.bc, ctx:nCtxSelf() };
+}
+function nRows(g){
+  const row = (l,v)=>'<div class="trow"><span class="d">'+l+'</span><span class="s num">'+v+'</span></div>';
+  return '<div class="trendrows" style="margin-top:0">'
+    + row("Calories", g.kcal_train+' train / '+g.kcal_rest+' rest')
+    + row("Protein", g.protein_g+' g'+(g.protein_cap_g?' (cap '+g.protein_cap_g+')':''))
+    + row("Carbs", g.carb_g_train+' / '+g.carb_g_rest+' g')
+    + row("Fat", g.fat_g+' g') + '</div>';
+}
+function nModeName(m){ return (GOAL_MODES.find(x=>x[0]===m)||[0,m])[1]; }
+function nModeChips(cur, fn){
+  return '<div class="chips">'+GOAL_MODES.map(([k,l])=>'<button class="chip'+(cur===k?" on":"")+'" onclick="'+fn+'(\''+k+'\')">'+l+'</button>').join("")+'</div>';
+}
+function nPickMode(k){ nut.draftMode = k; render(); }
+
 function renderFoodGoal(){
-  const g = nut.goal;
+  const g = nut.goal, W = nWho(), B = nBody(W.ctx);
   let h = '<div class="nsec"><h2>Targets</h2></div><div class="panel a">';
   if (g && !nut.goalEdit){
-    const mode = (GOAL_MODES.find(x=>x[0]===g.mode)||[0,g.mode])[1];
-    h += '<div class="trendrows" style="margin-top:0">'
-      + '<div class="trow"><span class="d">Goal</span><span class="s">'+esc(mode)+' · since '+nDate(g.effective_from)+'</span></div>'
-      + '<div class="trow"><span class="d">Calories</span><span class="s num">'+g.kcal_train+' train / '+g.kcal_rest+' rest</span></div>'
-      + '<div class="trow"><span class="d">Protein</span><span class="s num">'+g.protein_g+' g'+(g.protein_cap_g?' (cap '+g.protein_cap_g+')':'')+'</span></div>'
-      + '<div class="trow"><span class="d">Carbs</span><span class="s num">'+g.carb_g_train+' / '+g.carb_g_rest+' g</span></div>'
-      + '<div class="trow"><span class="d">Fat</span><span class="s num">'+g.fat_g+' g</span></div></div>';
+    const byCoach = g.set_by && g.set_by!==auth.uid;
+    h += '<p class="statline" style="margin:0 0 6px">'+esc(nModeName(g.mode))+' \u00B7 since '+nDate(g.effective_from)+(byCoach?' \u00B7 set by your coach':'')+'</p>'+nRows(g);
     const why = g.inputs && g.inputs.why;
     if (why && why.length) h += '<div class="nwhy">'+why.map(esc).join('<br>')+'</div>';
-    if (g.set_by && g.set_by!==auth.uid) h += '<p class="statline">Set by your coach.</p>';
-    h += '<div class="nbtnrow"><button class="silink" onclick="nut.goalEdit=true;nut.draftMode=\''+g.mode+'\';render()">Change goal or recalculate</button></div>';
-    return h + '</div>';
+    if (byCoach) h += '<p class="statline">Your coach set these. Ask them if something feels off.</p>';
+    else h += '<div class="nbtnrow"><button class="silink" onclick="nut.goalEdit=true;nut.draftMode=\''+g.mode+'\';render()">Change goal or recalculate</button></div>';
+    if (B.missing.length && !byCoach) h += '<div class="nwarn">Missing '+B.missing.join(", ")+'. Add them under Body data and recalculate for accurate targets.</div>';
+    h += '</div>';
+    return h + renderBodyData();
+  }
+  if (B.missing.length){
+    h += '<p class="statline" style="margin-top:0">First, a few details. Without a DEXA scan, your resting burn comes from sex, age, height, and weight.</p>'
+      + renderDetailsForm() + '</div>' + renderBodyData(true);
+    return h;
   }
   const mode = nut.draftMode || (g && g.mode) || null;
-  h += '<p class="statline" style="margin-top:0">Pick a goal. Targets come from your latest DEXA lean mass, PNOE resting burn, and WHOOP daily burn.</p>'
-    + '<div class="chips">'+GOAL_MODES.map(([k,l])=>'<button class="chip'+(mode===k?" on":"")+'" onclick="nut.draftMode=\''+k+'\';render()">'+l+'</button>').join("")+'</div>';
+  h += '<p class="statline" style="margin-top:0">Pick a goal. Targets use your newest scan or details, weigh-ins, and WHOOP burn when available.</p>' + nModeChips(mode, "nPickMode");
   if (mode){
-    const c = nComputeGoal(mode);
-    h += '<div class="trendrows">'
-      + '<div class="trow"><span class="d">Calories</span><span class="s num">'+c.kcal_train+' train / '+c.kcal_rest+' rest</span></div>'
-      + '<div class="trow"><span class="d">Protein</span><span class="s num">'+c.protein_g+' g</span></div>'
-      + '<div class="trow"><span class="d">Carbs</span><span class="s num">'+c.carb_g_train+' / '+c.carb_g_rest+' g</span></div>'
-      + '<div class="trow"><span class="d">Fat</span><span class="s num">'+c.fat_g+' g</span></div></div>'
-      + '<div class="nwhy">'+c.inputs.why.map(esc).join('<br>')+'</div>';
+    const c = nComputeGoal(mode, W.ctx);
+    h += nRows(c) + '<div class="nwhy">'+c.inputs.why.map(esc).join('<br>')+'</div>';
     if (mode==="lean_gain") h += '<div class="nwarn">A surplus raises training-day calories most. Watch the 4-week scale trend; if you gain more than about 2 lb a month, drop carbs 30 to 50 g.</div>';
-    if (!nut.dexa) h += '<div class="nwarn">No DEXA on file. Protein is based on bodyweight until you add a scan.</div>';
+    if (!B.lean) h += '<div class="nwarn">No body fat data, so protein is based on bodyweight. A DEXA scan or a body fat % under Body data sharpens it.</div>';
     h += '<div class="nbtnrow"><button class="sibtn" onclick="nSaveGoal()">Save targets</button>'
       + (g ? '<button class="silink" onclick="nut.goalEdit=false;nut.draftMode=null;render()">Cancel</button>' : '') + '</div>';
   }
+  return h + '</div>' + renderBodyData();
+}
+async function nSaveGoal(){
+  const W = nWho();
+  const g = nComputeGoal(nut.draftMode || (nut.goal && nut.goal.mode) || "maintain", W.ctx);
+  const body = Object.assign({ user_id:auth.uid, effective_from:dayKey(), set_by:auth.uid }, g);
+  try {
+    const r = await sb("/rest/v1/nutrition_goals?on_conflict=user_id,effective_from", { method:"POST",
+      headers:{ Prefer:"resolution=merge-duplicates,return=representation" }, body });
+    if (!r.ok) throw new Error(r.status);
+    nut.goal = (await r.json())[0]; nut.goalEdit = false; nut.draftMode = null;
+    toast("Targets saved."); render();
+  } catch(e){ toast("Couldn\u2019t save targets."); }
+}
+
+// ----- details: sex, birth year, height, weight, optional body fat -----
+function nDetailsDraft(){
+  const W = nWho(), p = W.prof || {}, B = nBody(W.ctx);
+  if (!nut.details || nut.details._uid!==W.uid){
+    const hi = +p.height_in || 0;
+    nut.details = { _uid:W.uid, sex:p.sex||"", birth_year:p.birth_year?String(p.birth_year):"", ft: hi?String(Math.floor(hi/12)):"", inch: hi?String(r0(hi%12)):"",
+      wt: B.wt?String(r1(B.wt)):"", bf:"" };
+  }
+  return nut.details;
+}
+function renderDetailsForm(){
+  const D = nDetailsDraft(), W = nWho();
+  const sexBtn = (v,l)=>'<button class="chip'+(D.sex===v?" on":"")+'" onclick="nut.details.sex=\''+v+'\';render()">'+l+'</button>';
+  const inp = (k, ph, mode)=>'<input class="ninput" inputmode="'+(mode||"numeric")+'" placeholder="'+ph+'" value="'+esc(D[k]||"")+'" oninput="nut.details.'+k+'=this.value">';
+  return '<div class="chips" style="margin-top:8px">'+sexBtn("male","Male")+sexBtn("female","Female")+'</div>'
+    + '<div class="ngrid"><div class="wide"><label>Birth year</label>'+inp("birth_year","1990")+'</div>'
+    + '<div><label>Height ft</label>'+inp("ft","5")+'</div><div><label>Height in</label>'+inp("inch","10","decimal")+'</div>'
+    + '<div><label>Weight lb</label>'+inp("wt","180","decimal")+'</div><div><label>Body fat % (optional)</label>'+inp("bf","if known","decimal")+'</div></div>'
+    + '<div class="nbtnrow"><button class="sibtn" onclick="nSaveDetails()">Save details</button>'
+    + (nut.detailsOpen ? '<button class="silink" onclick="nut.detailsOpen=false;nut.details=null;render()">Cancel</button>' : '') + '</div>'
+    + (W.self ? '<p class="statline">Weight is saved as a weigh-in, same as the Progress tab.</p>' : '');
+}
+async function nSaveDetails(){
+  const D = nut.details, W = nWho(); if (!D) return;
+  const yr = parseInt(D.birth_year,10), ft = parseFloat(D.ft)||0, inch = parseFloat(D.inch)||0, wt = parseFloat(D.wt), bf = parseFloat(D.bf);
+  const nowY = new Date().getFullYear(), hgt = ft*12 + inch;
+  if (!D.sex){ toast("Pick male or female."); return; }
+  if (!(yr>=1920 && yr<=nowY-10)){ toast("Enter a 4-digit birth year."); return; }
+  if (!(hgt>=48 && hgt<=96)){ toast("Height looks off. Enter feet and inches."); return; }
+  if (!(wt>=70 && wt<=600)){ toast("Enter weight in pounds."); return; }
+  if (D.bf!=="" && !(bf>=3 && bf<=60)){ toast("Body fat should be between 3 and 60%."); return; }
+  try {
+    const r = await sb("/rest/v1/profiles?user_id=eq."+W.uid, { method:"PATCH", body:{ sex:D.sex, birth_year:yr, height_in:r1(hgt) } });
+    if (!r.ok) throw new Error("profile");
+    Object.assign(W.prof, { sex:D.sex, birth_year:yr, height_in:r1(hgt) });
+    const B = nBody(W.ctx);
+    if (W.self){
+      if (!B.wt || Math.abs(B.wt - wt) >= 0.1){
+        metrics.push({ id:Date.now(), date:new Date().toISOString(), w:wt, waist:null });
+        try { persist(); pushLog(); } catch(e){}
+      }
+    } else if (!B.wt || Math.abs(B.wt - wt) >= 0.1){
+      await nUpsertBc({ method:"scale", measured_on:dayKey(), weight_lb:wt });
+    }
+    if (D.bf!==""){
+      await nUpsertBc({ method:"estimate", measured_on:dayKey(), weight_lb:wt, body_fat_pct:r1(bf),
+        lean_mass_lb:r1(wt*(1-bf/100)), fat_mass_lb:r1(wt*bf/100), notes:"Entered estimate" });
+    }
+    nut.details = null; nut.detailsOpen = false;
+    if (nut.goal && !nut.coachUid) nut.goalEdit = true;
+    toast("Details saved."); render();
+  } catch(e){ toast("Couldn\u2019t save details."); }
+}
+
+// ----- body data: scans and estimates -----
+async function nUpsertBc(row){
+  const W = nWho();
+  const r = await sb("/rest/v1/body_comp?on_conflict=user_id,measured_on,method", { method:"POST",
+    headers:{ Prefer:"resolution=merge-duplicates,return=representation" }, body: Object.assign({ user_id:W.uid }, row) });
+  if (!r.ok) throw new Error("bc "+r.status);
+  const saved = (await r.json())[0];
+  const list = W.bc;
+  const i = list.findIndex(x=>x.id===saved.id || (x.measured_on===saved.measured_on && x.method===saved.method));
+  if (i>=0) list[i] = saved; else list.unshift(saved);
+  list.sort((x,y)=>x.measured_on<y.measured_on?1:-1);
+  return saved;
+}
+const BC_LABEL = { dexa:"DEXA", pnoe:"PNOE", estimate:"Body fat est.", scale:"Weigh-in" };
+function renderBodyData(compact){
+  const W = nWho(), p = W.prof || {}, age = nAge(p);
+  let h = '<div class="nsec"><h2>Body data</h2>'+(nut.bcForm?'':'<button onclick="nBcNew()">+ Add</button>')+'</div><div class="panel a">';
+  if (!compact){
+    if (nut.detailsOpen) h += renderDetailsForm();
+    else h += '<div class="trow" style="border-top:0;padding-top:0"><span class="d">Details</span><span class="s">'
+      + (p.sex || age || p.height_in ? esc([p.sex ? p.sex[0].toUpperCase()+p.sex.slice(1) : null, age ? age+" yr" : null, p.height_in ? Math.floor(p.height_in/12)+"\u2032"+r0(p.height_in%12)+"\u2033" : null].filter(Boolean).join(" \u00B7 ")) : "Not set")
+      + ' <button class="silink" style="margin-left:6px" onclick="nut.detailsOpen=true;nut.details=null;render()">Edit</button></span></div>';
+  }
+  if (nut.bcForm) h += renderBcForm();
+  const rows = (W.bc||[]).filter(r=>r.method!=="scale").slice(0,8);
+  if (!rows.length && !nut.bcForm) h += '<p class="statline">Add a DEXA scan, PNOE resting burn, or a body fat % estimate. The newest one drives your targets.</p>';
+  rows.forEach(r=>{
+    const parts = [];
+    if (r.weight_lb) parts.push(r1(r.weight_lb)+" lb");
+    if (r.body_fat_pct) parts.push(r1(r.body_fat_pct)+"% BF");
+    if (r.lean_mass_lb) parts.push(r1(r.lean_mass_lb)+" lean");
+    if (r.rmr_kcal) parts.push(r.rmr_kcal+" kcal RMR");
+    h += '<div class="trow"><span class="d">'+nDate(r.measured_on)+' \u00B7 '+(BC_LABEL[r.method]||r.method)+'</span><span class="s num">'+esc(parts.join(" \u00B7 "))
+      + ' <button class="delbtn sm" onclick="nBcDelete(\''+r.id+'\')" aria-label="Delete">\u2715</button></span></div>';
+  });
   return h + '</div>';
+}
+function nBcNew(){ nut.bcForm = { method:"dexa", date:dayKey(), wt:"", lean:"", bf:"", rmr:"" }; render(); }
+function renderBcForm(){
+  const F = nut.bcForm;
+  const mb = (v,l)=>'<button class="chip'+(F.method===v?" on":"")+'" onclick="nut.bcForm.method=\''+v+'\';render()">'+l+'</button>';
+  const inp = (k, lab, ph)=>'<div><label>'+lab+'</label><input class="ninput" inputmode="decimal" placeholder="'+(ph||"")+'" value="'+esc(F[k]||"")+'" oninput="nut.bcForm.'+k+'=this.value"></div>';
+  let h = '<div class="chips" style="margin-top:4px">'+mb("dexa","DEXA")+mb("pnoe","PNOE")+mb("estimate","Body fat %")+'</div>'
+    + '<div class="ngrid"><div class="wide"><label>Date</label><input class="ninput" type="date" max="'+dayKey()+'" value="'+F.date+'" onchange="nut.bcForm.date=this.value"></div>';
+  if (F.method==="dexa") h += inp("wt","Total mass lb","210.4") + inp("lean","Lean mass lb","174.6") + inp("bf","Body fat %","13.2");
+  else if (F.method==="pnoe") h += inp("rmr","Resting burn kcal","2365") + inp("wt","Weight lb (optional)");
+  else h += inp("bf","Body fat %","18") + inp("wt","Weight lb","");
+  h += '</div>';
+  if (F.method==="dexa") h += '<p class="statline">Use the measured total mass and lean mass from the scan report, not the weight typed in at check-in.</p>';
+  if (F.method==="estimate") h += '<p class="statline">Calipers, a smart scale, or an eyeball estimate. Less precise than DEXA; a scan always takes priority.</p>';
+  return h + '<div class="nbtnrow"><button class="sibtn" onclick="nBcSave()">Save</button><button class="silink" onclick="nut.bcForm=null;render()">Cancel</button></div>';
+}
+async function nBcSave(){
+  const F = nut.bcForm; if (!F) return;
+  const wt = parseFloat(F.wt), lean = parseFloat(F.lean), bf = parseFloat(F.bf), rmr = parseInt(F.rmr,10);
+  if (!F.date || F.date>dayKey()){ toast("Pick the date it was measured."); return; }
+  const row = { method:F.method, measured_on:F.date, source_file:null };
+  if (F.method==="dexa"){
+    if (!(wt>70)){ toast("Enter total mass in pounds."); return; }
+    if (!(lean>40) && !(bf>2)){ toast("Enter lean mass or body fat %."); return; }
+    row.weight_lb = r1(wt);
+    if (bf>2){ row.body_fat_pct = r1(bf); row.fat_mass_lb = r1(wt*bf/100); }
+    row.lean_mass_lb = lean>40 ? r1(lean) : r1(wt*(1-bf/100));
+    if (!(bf>2) && lean>40) row.body_fat_pct = r1(Math.max(0, (wt-lean)/wt*100 - 3.5)); // lean excludes ~3.5% bone
+  } else if (F.method==="pnoe"){
+    if (!(rmr>=900 && rmr<=4500)){ toast("Enter resting burn in kcal per day."); return; }
+    row.rmr_kcal = rmr; if (wt>70) row.weight_lb = r1(wt);
+  } else {
+    if (!(bf>=3 && bf<=60)){ toast("Body fat should be between 3 and 60%."); return; }
+    const w = wt>70 ? wt : nBody(nWho().ctx).wt;
+    if (!w){ toast("Enter weight too."); return; }
+    Object.assign(row, { weight_lb:r1(w), body_fat_pct:r1(bf), lean_mass_lb:r1(w*(1-bf/100)), fat_mass_lb:r1(w*bf/100), notes:"Entered estimate" });
+  }
+  try { await nUpsertBc(row); nut.bcForm = null; toast("Saved. Recalculate targets to use it."); if (!nut.coachUid && nut.goal) nut.goalEdit = true; render(); }
+  catch(e){ toast("Couldn\u2019t save."); }
+}
+async function nBcDelete(id){
+  const W = nWho(); const row = W.bc.find(x=>x.id===id); if (!row) return;
+  if (!confirm("Delete this "+(BC_LABEL[row.method]||"entry")+" from "+nDate(row.measured_on)+"?")) return;
+  try { const r = await sb("/rest/v1/body_comp?id=eq."+id, { method:"DELETE" }); if (!r.ok) throw new Error();
+    const i = W.bc.indexOf(row); if (i>=0) W.bc.splice(i,1); render(); }
+  catch(e){ toast("Couldn\u2019t delete."); }
+}
+
+// ---------- coach: athlete nutrition ----------
+function nCtxCoach(){
+  const C = nut.coach;
+  return { prof:C.prof, metrics:C.metrics, bc:C.bc, days:C.days, whoopKg:C.whoopKg,
+    isTrain: day => C.sessions.some(s=>s && s.workout!=="ACT" && dayKey(new Date(s.date))===day) };
+}
+async function nCoachOpen(uid){
+  nut.coachUid = uid; nut.coach = null; nut.cg = null; nut.details = null; nut.detailsOpen = false; nut.bcForm = null; render();
+  try { scrollTo({top:0}); } catch(e){}
+  const since = nDayOffset(dayKey(), -13);
+  try {
+    const [pr, lr, bc, gr, dr, wd, wb] = await Promise.all([
+      sb("/rest/v1/profiles?select=user_id,display_name,sex,birth_year,height_in&user_id=eq."+uid),
+      sb("/rest/v1/logs?select=data&user_id=eq."+uid),
+      sb("/rest/v1/body_comp?select=*&user_id=eq."+uid+"&order=measured_on.desc&limit=40"),
+      sb("/rest/v1/nutrition_goals?select=*&user_id=eq."+uid+"&order=effective_from.desc&limit=1"),
+      sb("/rest/v1/nutrition_daily?select=*&user_id=eq."+uid+"&eaten_on=gte."+since+"&order=eaten_on.asc"),
+      sb("/rest/v1/whoop_days?select=day,calories&user_id=eq."+uid+"&order=day.desc&limit=35"),
+      sb("/rest/v1/whoop_body?select=weight_kg&user_id=eq."+uid),
+    ]);
+    if (!pr.ok) throw new Error();
+    const prof = (await pr.json())[0] || { user_id:uid };
+    const log = lr.ok ? ((await lr.json())[0] || {}) : {};
+    const data = log.data || {};
+    if (nut.coachUid!==uid) return;
+    nut.coach = { uid, name: prof.display_name || "Athlete", prof,
+      metrics: Array.isArray(data.metrics) ? data.metrics : [], sessions: Array.isArray(data.sessions) ? data.sessions : [],
+      bc: bc.ok ? await bc.json() : [], goal: gr.ok ? ((await gr.json())[0]||null) : null, daily: dr.ok ? await dr.json() : [],
+      days: wd.ok ? (await wd.json()).reverse() : [], whoopKg: wb.ok ? (((await wb.json())[0]||{}).weight_kg || null) : null };
+  } catch(e){ toast("Couldn\u2019t load athlete nutrition."); nut.coachUid = null; }
+  if (tab==="coach") render();
+}
+function nCoachClose(){ nut.coachUid = null; nut.coach = null; nut.cg = null; nut.details = null; nut.bcForm = null; render(); }
+const CG_FIELDS = [["kcal_train","Calories, training"],["kcal_rest","Calories, rest"],["protein_g","Protein g"],["fat_g","Fat g"],["carb_g_train","Carbs g, training"],["carb_g_rest","Carbs g, rest"]];
+function nCgMode(k){
+  const c = nComputeGoal(k, nCtxCoach());
+  nut.cg = { mode:k, calc:c, vals:{} };
+  CG_FIELDS.forEach(([f])=>{ nut.cg.vals[f] = String(c[f]); });
+  render();
+}
+function nCgSet(f, v){
+  nut.cg.vals[f] = v;
+  const el = document.getElementById("ncgchk"); if (el) el.innerHTML = nCgCheck();
+}
+function nCgCheck(){
+  const v = k => parseFloat(nut.cg.vals[k])||0;
+  const t = v("protein_g")*4 + v("fat_g")*9 + v("carb_g_train")*4, r = v("protein_g")*4 + v("fat_g")*9 + v("carb_g_rest")*4;
+  const off = (a,b)=>Math.abs(a-b) > 60;
+  return 'Macros add up to <b class="num">'+nNum(t)+'</b> training / <b class="num">'+nNum(r)+'</b> rest'
+    + (off(t, v("kcal_train")) || off(r, v("kcal_rest")) ? ' <span style="color:var(--warn)">(doesn\u2019t match the calorie targets)</span>' : '');
+}
+function nCgRebalance(){
+  const v = k => parseFloat(nut.cg.vals[k])||0, p = v("protein_g"), f = v("fat_g");
+  nut.cg.vals.carb_g_train = String(Math.max(0, r0((v("kcal_train") - p*4 - f*9)/4)));
+  nut.cg.vals.carb_g_rest = String(Math.max(0, r0((v("kcal_rest") - p*4 - f*9)/4)));
+  render();
+}
+async function nCgSave(){
+  const C = nut.coach, cg = nut.cg; if (!C || !cg) return;
+  const vals = {}; let bad = false;
+  CG_FIELDS.forEach(([f])=>{ const n = parseInt(cg.vals[f],10); if (!(n>=0)) bad = true; vals[f] = n; });
+  if (bad || vals.kcal_train<800 || vals.kcal_rest<800){ toast("Check the numbers; calories should be at least 800."); return; }
+  const changed = CG_FIELDS.filter(([f])=>vals[f]!==cg.calc[f]).map(([,l])=>l);
+  const inputs = Object.assign({}, cg.calc.inputs, { why: cg.calc.inputs.why.concat(changed.length ? ["Coach adjusted: "+changed.join(", ")] : []), coach_override: changed.length>0 });
+  const body = Object.assign({ user_id:C.uid, mode:cg.mode, effective_from:dayKey(), set_by:auth.uid, protein_cap_g: cg.calc.protein_cap_g, inputs }, vals);
+  try {
+    const r = await sb("/rest/v1/nutrition_goals?on_conflict=user_id,effective_from", { method:"POST",
+      headers:{ Prefer:"resolution=merge-duplicates,return=representation" }, body });
+    if (!r.ok) throw new Error(r.status);
+    C.goal = (await r.json())[0]; nut.cg = null;
+    if (C.uid===auth.uid){ nut.goal = C.goal; }
+    toast("Targets saved for "+C.name.split(" ")[0]+"."); render();
+  } catch(e){ toast("Couldn\u2019t save targets."); }
+}
+function renderCoachNutrition(){
+  const C = nut.coach;
+  let h = '<button class="silink" onclick="nCoachClose()">\u2190 Roster</button>';
+  if (!C) return h + '<div class="panel a"><p class="statline">Loading\u2026</p></div>';
+  const first = esc(C.name.split(" ")[0]);
+  h += '<h2 class="sect disp a">'+esc(C.name)+' \u00B7 Nutrition</h2>';
+
+  // Intake, last 7 days
+  const wk = C.daily.filter(d=>d.eaten_on > nDayOffset(dayKey(), -7));
+  const g = C.goal;
+  h += '<div class="panel a">';
+  if (!C.daily.length) h += '<p class="statline" style="margin-top:0">'+first+' hasn\u2019t logged food in the last 2 weeks.</p>';
+  else {
+    const av = k => r0(wk.reduce((a,d)=>a+(+d[k]||0),0)/Math.max(1,wk.length));
+    const tK = g ? r0((g.kcal_train*5 + g.kcal_rest*2)/7) : null;
+    h += '<div class="bmetrics" style="margin:0">'+statCell("Avg cal", nNum(av("kcal")))+statCell("Avg protein", av("protein_g")+"g")+statCell("Days logged", wk.length+"/7")+'</div>'
+      + (g ? '<p class="statline">Targets average '+nNum(tK)+' cal and '+g.protein_g+' g protein. Averages count logged days only.</p>' : '');
+  }
+  h += '</div>';
+
+  // Current targets
+  h += '<div class="nsec"><h2>Targets</h2></div><div class="panel a">';
+  if (g){
+    h += '<p class="statline" style="margin:0 0 6px">'+esc(nModeName(g.mode))+' \u00B7 since '+nDate(g.effective_from)+' \u00B7 set by '+(g.set_by===C.uid?first:(g.set_by===auth.uid?"you":"coach"))+'</p>'+nRows(g);
+  } else h += '<p class="statline" style="margin-top:0">No targets yet.</p>';
+  if (!nut.cg) h += '<div class="nbtnrow"><button class="sibtn" onclick="nCgMode(\''+(g?g.mode:"maintain")+'\')">'+(g?"Adjust targets":"Set targets")+'</button></div>';
+  h += '</div>';
+
+  if (nut.cg){
+    const c = nut.cg.calc, B = nBody(nCtxCoach());
+    h += '<div class="panel a"><p class="statline" style="margin-top:0">Goal</p>'+nModeChips(nut.cg.mode, "nCgMode");
+    h += '<div class="nwhy">'+c.inputs.why.map(esc).join('<br>')+'</div>';
+    if (B.missing.length) h += '<div class="nwarn">Missing '+B.missing.join(", ")+'. Fill in details below for better numbers, or set them by hand.</div>';
+    h += '<div class="ngrid">'+CG_FIELDS.map(([f,l])=>'<div><label>'+l+(String(c[f])!==nut.cg.vals[f]?' \u00B7 edited':'')+'</label><input class="ninput" inputmode="numeric" value="'+esc(nut.cg.vals[f])+'" oninput="nCgSet(\''+f+'\',this.value)" onchange="render()"></div>').join("")+'</div>'
+      + '<p class="statline" id="ncgchk">'+nCgCheck()+'</p>'
+      + '<div class="nbtnrow"><button class="sibtn" onclick="nCgSave()">Save for '+first+'</button><button class="silink" onclick="nCgRebalance()">Fill carbs from calories</button><button class="silink" onclick="nut.cg=null;render()">Cancel</button></div></div>';
+  }
+  const B = nBody(nCtxCoach());
+  if (B.missing.length && !nut.detailsOpen){ nut.detailsOpen = true; nut.details = null; }
+  h += renderBodyData();
+  return h;
 }

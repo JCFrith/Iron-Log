@@ -2065,7 +2065,7 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=15.4"></script>
+<script src="nutrition.js?v=15.5"></script>
 <script>
 
 "use strict";
@@ -2162,7 +2162,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "15.4";
+const APP_VERSION = "15.5";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2272,7 +2272,7 @@ async function signOut(){
 
 // ---------- profile + program ----------
 async function ensureProfile(){
-  let r = await sb("/rest/v1/profiles?select=display_name,is_coach,program_id,theme&user_id=eq."+auth.uid);
+  let r = await sb("/rest/v1/profiles?select=display_name,is_coach,program_id,theme,sex,birth_year,height_in&user_id=eq."+auth.uid);
   if (!r.ok) throw 0;
   let rows = await r.json();
   if (!rows.length){
@@ -2975,9 +2975,10 @@ async function choosePath(key){
     if (!r.ok) throw 0;
     const rows = await r.json();
     if (!rows.length){ toast("That program isn\u2019t published yet \u2014 your coach is on it."); return; }
-    const p = await sb("/rest/v1/profiles?user_id=eq."+auth.uid, { method:"PATCH", body:{ program_id: rows[0].id } });
+    const p = await sb("/rest/v1/profiles?user_id=eq."+auth.uid, { method:"PATCH", body:{ program_id: rows[0].id, sex: pathSex || undefined } });
     if (!p.ok) throw 0;
     profile.program_id = rows[0].id;
+    if (pathSex) profile.sex = pathSex;
     pathSex = null;
     await loadProgram();
     toast("Path set \u2014 "+rows[0].name+".");
@@ -3923,7 +3924,7 @@ function findEx(exId){
 
 // ================= Render =================
 function setTab(t){
-  tab=t; adjustOpen=null; if (t!=="coach") coachView=null;
+  tab=t; adjustOpen=null; if (t!=="coach"){ coachView=null; if (typeof nut!=="undefined") nut.coachUid=null; }
   ["train","food","progress","coach"].forEach(x=>{
     const b=document.getElementById("tab-"+x);
     if (b) b.className = (x===t?"on":"");
@@ -5141,6 +5142,7 @@ function renderAthleteDetail(){
 function renderCoach(){
   if (!coachData) return '<div class="panel a"><p class="empty">Loading roster\u2026</p></div>';
   if (progEdit) return renderProgEdit();
+  if (typeof nut!=="undefined" && nut.coachUid) return renderCoachNutrition();
   if (coachView) return renderAthleteDetail();
   let h = "";
   {
@@ -5174,7 +5176,8 @@ function renderCoach(){
     h += '<div class="field" style="margin-top:10px" onclick="event.stopPropagation()"><label>Program</label><select class="progsel" onchange="assignProgram(\''+a.uid+'\', this.value)">';
     h += '<option value=""'+(a.program_id?'':' selected')+'>\u2014 none (built-in default)</option>';
     coachData.programs.forEach(p=>{ h += '<option value="'+p.id+'"'+(p.id===a.program_id?' selected':'')+'>'+esc(p.name)+'</option>'; });
-    h += '</select></div></div>';
+    h += '</select></div>';
+    h += '<div class="nbtnrow" style="margin-top:8px" onclick="event.stopPropagation()"><button class="sibtn sm" onclick="nCoachOpen(\''+a.uid+'\')">Nutrition</button></div></div>';
   });
     h += '<h2 class="sect disp a">Programs</h2><div class="panel a">';
   coachData.programs.forEach(p=>{

@@ -928,7 +928,7 @@ function nRing(pct, state){
     + '</svg>';
 }
 function renderFood(){
-  if (!auth) return '<div class="panel a"><p class="statline">Sign in to track food. Your log syncs to your account so your coach can see it.</p></div>';
+  if (!auth) return '<div class="panel a"><p class="statline">Sign in to track food. Your log syncs to your account so your coach can see it.</p><button class="sibtn foodsignin" onclick="setTab(\'train\');setTimeout(function(){var f=document.getElementById(\'si_email\');if(f)f.focus();},50)">Sign in</button></div>';
   if (!nut.day) nut.day = dayKey();
   if (nut.loadedFor!==nut.day && !nut.loading) setTimeout(()=>nLoad(), 0);
   if (nut.view==="add") return renderFoodAdd();

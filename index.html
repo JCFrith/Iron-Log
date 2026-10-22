@@ -2075,7 +2075,15 @@
   .bm-sw.bm-in { background:var(--accent); } .bm-sw.bm-over { background:var(--warn); }
   .devbadge { position:fixed; left:50%; transform:translateX(-50%); top:calc(4px + env(safe-area-inset-top)); z-index:60; pointer-events:none;
     padding:2px 8px; border-radius:6px; background:#7c3aed; color:#fff; font-size:11px; font-weight:900; letter-spacing:.08em; }
-  </style>
+    /* ============ v16 HIG pass 2 ============ */
+  .exnote2 { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; width:100%; margin:10px 0 0; padding:0;
+    border:0; background:none; color:var(--dim); font-size:14px; line-height:1.4; text-align:left; min-height:44px; }
+  .exnote2.open { -webkit-line-clamp:unset; display:block; }
+  .exnote2:not(.open)::after { content:""; }
+  .btitle.long { font-size:clamp(30px,9vw,44px) !important; line-height:.98; }
+  .delta { white-space:nowrap; }
+  .foodsignin { margin-top:12px; }
+</style>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute"><defs>
@@ -3612,6 +3620,8 @@ function setSessNote(v){ sessionNote=v; saveDraft(); }
 let sessionNote = "";
 let noteDrafts = {};
 let noteOpen = null;
+let noteExp = {};
+function toggleExNote(id){ if (noteExp[id]) delete noteExp[id]; else noteExp[id]=true; render(); }
 let restEnd = 0, restInt = null;
 // ===== Set types: undefined = working, "w" = warm-up, "d" = drop =====
 // Warm-ups are excluded from EVERYTHING (volume, e1RM, PRs, progression, stalls).
@@ -3870,7 +3880,8 @@ function plannedGroupSets(){
     for (const k of keys){
       const w = WORKOUTS[k]; if (!w) continue;
       for (const e of w.exercises){
-        const grp = (e.cat && CAT_GROUP[e.cat]) || "Other";
+        if (!e.cat || !CAT_GROUP[e.cat]) continue;
+        const grp = CAT_GROUP[e.cat];
         g[grp] = (g[grp]||0) + (e.sets||0);
       }
     }
@@ -4053,7 +4064,7 @@ function summaryStats(days){
 }
 function prLog(){
   const best = {}; const out = [];
-  for (const s of sessions){
+  for (const s of sessions.slice().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0)){
     if (s.deload) continue;
     for (const [id,rawSets] of Object.entries(s.entries||{})){
       const sets = workSets(rawSets);
@@ -4418,8 +4429,8 @@ function renderTrain(){
   h += '<div class="kicker"><span class="pulse still"></span>Briefing \u00B7 '+esc(dayName)+' \u00B7 '+fmtDate(new Date().toISOString())+(programName?' \u00B7 '+esc(programName):'')
     +(todayW ? (todayW!==workoutId ? ' \u00B7 switched' : ' \u00B7 scheduled') : ' \u00B7 rest day')+'</div>';
   h += '<div class="briefrow">'
-    + '<div class="briefmain"><div class="btitle disp">'+esc(w.label)+'</div>'
-    + (w.tag?'<div class="wtag">'+esc(w.tag)+'</div>':'')
+    + '<div class="briefmain"><div class="btitle disp'+(w.label.length>12?" long":"")+'">'+esc(w.label)+'</div>'
+    + (w.tag && w.label.toUpperCase().indexOf(w.tag.toUpperCase())<0 ?'<div class="wtag">'+esc(w.tag)+'</div>':'')
     + (status?'<div class="mstatus '+status.c+'">'+status.t+(avgWorkoutMins(workoutId)?' \u00B7 ~'+avgWorkoutMins(workoutId)+' MIN':'')+'</div>':'')
     + '</div>'
     + (auth&&whoopRec?readinessRing(whoopRec.recovery_score):'')
@@ -4510,11 +4521,11 @@ function renderTrain(){
       +'<h3 class="exname disp">'+esc(e.name)+' <span class="swapic">\u21C4</span></h3>'
       +(e.subOf?'<span class="subnote">sub for '+esc(e.subOf.name)+'</span>':'')
       +'<span class="exrx num">'+e.sets+' \u00D7 '+rngTxt(e)+' '+(e.unit==="sec"?"sec":"reps")+(policyOf(e)!=="double"&&policyOf(e)!=="time"||(policyOf(e)==="time"&&e.unit!=="sec")?' \u00B7 '+policyOf(e):'')+'</span>'
-      +(e.note?'<span class="exnote">'+esc(e.note)+'</span>':'')
       +'</button>'
       +(e.bw?'':'<button class="notebtn" onclick="openPlatesFor(\''+e.id+'\')" aria-label="plates for '+esc(e.name)+'"><svg width="17" height="11" viewBox="0 0 22 12" fill="currentColor"><rect x="0" y="3" width="2.5" height="6" rx="1"/><rect x="3.5" y="1" width="3" height="10" rx="1"/><rect x="15.5" y="1" width="3" height="10" rx="1"/><rect x="19.5" y="3" width="2.5" height="6" rx="1"/><rect x="6.5" y="5" width="9" height="2" rx="1"/></svg></button>')
       +'<button class="notebtn'+((noteDrafts[e.id]&&noteDrafts[e.id].trim())||noteOpen===e.id?" on":"")+'" onclick="toggleNote(\''+e.id+'\')" aria-label="note for '+esc(e.name)+'">\u270E</button>'
       +(explanText(e, plan) ? '<span class="explan num'+((plan.mode==="add"||plan.mode==="addtime")?" hot":"")+'">'+explanText(e, plan)+'</span>' : '')+'</div>';
+    if (e.note) h += '<button class="exnote2'+(noteExp[e.id]?" open":"")+'" onclick="toggleExNote(\''+e.id+'\')" aria-expanded="'+!!noteExp[e.id]+'">'+esc(e.note)+'</button>';
     // coach box
     const adv = (plan.mode==="add"||plan.mode==="beat"||plan.mode==="addtime") ? recAdvice() : null;
     const excl = sessNoProg || !!noProgDraft[e.id];
@@ -4572,7 +4583,7 @@ function renderTrain(){
     +'<button id="restchip" class="restchip" style="display:none" onclick="stopRest()"></button>'
     +'<button id="restplus" class="restchip plus" style="display:none" onclick="restEnd+=30000;tickRest()">+30s</button>'
     +'<div class="tally num" id="sesslive"><b>'+t.sets+'/'+t.total+'</b> sets \u00B7 <b>'+(t.vol>=1000?(t.vol/1000).toFixed(1)+"k":t.vol)+'</b> lb</div>'
-    +'<button class="savebtn'+(t.sets?"":" idle")+'" onclick="saveSession()">Save '+esc(w.label)+'</button>'
+    +'<button class="savebtn'+(t.sets?"":" idle")+'" onclick="saveSession()" aria-label="Save '+esc(w.label)+'">'+(w.label.length>12?"Save workout":"Save "+esc(w.label))+'</button>'
     +'</div></div>';
   if (pickerFor) h += renderPicker(pickerFor);
   return h;
@@ -4998,7 +5009,7 @@ function liftDetailPanel(){
   const prs = prLog().filter(p=>p.id===exId).reverse();
   if (prs.length){
     h += '<h2 class="sect disp a">PR history</h2><div class="panel a"><div class="trendrows">';
-    prs.slice(0,8).forEach(p=>{ h += '<div class="trow"><span class="d">'+fmtDate(p.date)+'</span><span class="s num">'+p.w+'\u00D7'+p.r+' \u00B7 e1RM '+e1rm(p.w,p.r)+'</span></div>'; });
+    prs.slice(0,8).forEach(p=>{ h += '<div class="trow"><span class="d">'+fmtDate(p.date)+'</span><span class="s num">'+p.w+'\u00D7'+p.r+(e1rm(p.w,p.r)?' \u00B7 e1RM '+e1rm(p.w,p.r):'')+'</span></div>'; });
     h += '</div></div>';
   }
   // full session table

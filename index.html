@@ -4477,7 +4477,7 @@ function renderTrain(){
     h += '<div class="panel a whooprow"><span class="recdot '+recBand(sc)+'"></span><span class="rectext"><b class="num">'+sc+'%</b> recovery'
       +(whoopRec.hrv?' \u00B7 HRV <b class="num">'+Math.round(whoopRec.hrv)+'</b>':'')
       +(whoopRec.sleep_hours?' \u00B7 sleep <b class="num">'+whoopRec.sleep_hours+'h</b>':'')+'</span>'
-      +(sc<34?'<span class="recnote">Rough recovery \u2014 consider pulling a set per lift or training lighter today.</span>':'')
+      +(recAdvice()?'<span class="recnote">'+esc(recAdvice().copy)+'</span>':'')
       +'</div>';
   }
   {
@@ -4527,7 +4527,7 @@ function renderTrain(){
       +(explanText(e, plan) ? '<span class="explan num'+((plan.mode==="add"||plan.mode==="addtime")?" hot":"")+'">'+explanText(e, plan)+'</span>' : '')+'</div>';
     if (e.note) h += '<button class="exnote2'+(noteExp[e.id]?" open":"")+'" onclick="toggleExNote(\''+e.id+'\')" aria-expanded="'+!!noteExp[e.id]+'">'+esc(e.note)+'</button>';
     // coach box
-    const adv = (plan.mode==="add"||plan.mode==="beat"||plan.mode==="addtime") ? recAdvice() : null;
+    const adv = null;   // recovery advice lives once in the recovery panel, not on every lift
     const excl = sessNoProg || !!noProgDraft[e.id];
     h += '<div class="coach'+((plan.mode==="add"||plan.mode==="addtime")?" add":plan.mode==="deload"?" dl":plan.mode==="capped"?" cap":"")+(adv?" rec"+adv.lvl:"")+'"><span class="coachlbl">Coach</span>'
       +'<span class="tchip">'+coachChip(plan)+'</span>'

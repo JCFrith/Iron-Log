@@ -4448,8 +4448,8 @@ function renderTrain(){
   h += insightsBlock();
   h += '<div class="bmetrics">'
     +'<div class="bm"><span class="v num">'+sessN+'/'+WEEK_TARGET+'</span><span class="l">This week</span></div>'
-    +'<div class="bm"><span class="v num'+(readyCount?" hot":"")+'">'+(readyCount?"\u25B2 "+readyCount:"\u2013")+'</span><span class="l">Progressions</span></div>'
-    +'<div class="bm"><span class="v num'+(delta!==null&&delta>=0?" up":"")+'">'+(delta===null?"\u2013":(delta>=0?"+":"")+delta+"%")+'</span><span class="l">Vol pace wk/wk</span></div>'
+    +'<div class="bm"><span class="v num'+(readyCount?" hot":"")+'">'+(readyCount?"\u25B2 "+readyCount:"\u2013")+'</span><span class="l">To progress</span></div>'
+    +'<div class="bm"><span class="v num'+(delta!==null&&curVol>0&&delta>=0?" up":"")+'">'+((delta===null||curVol===0)?"\u2013":(delta>=0?"+":"")+delta+"%")+'</span><span class="l">Vol pace wk/wk</span></div>'
     +'</div>';
   h += '<button class="baction" onclick="fillAll()">Fill session to plan \u2192</button>';
   if (!wkStart){

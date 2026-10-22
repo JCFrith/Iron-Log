@@ -2039,7 +2039,43 @@
   }
     /* four-tab bar (Session, Food, Progress, Coach) fits a phone */
   @media (max-width:440px){ .tabs button { min-width:0; padding:0 2px; font-size:12.5px; letter-spacing:.07em; } }
-</style>
+  /* ============ v16: progression controls, effort, rotation, muscle map ============ */
+  .npbtn { display:block; width:100%; margin-top:10px; min-height:44px; padding:10px 12px; border-radius:12px;
+    border:1px dashed var(--border2); background:transparent; color:var(--dim); font-size:13px; font-weight:700; text-align:left;
+    transition:transform .14s var(--ease-out, ease-out), background-color .2s ease, border-color .2s ease, color .2s ease; }
+  .npbtn:active { transform:scale(.97); }
+  .npbtn.on { border-style:solid; border-color:rgba(251,191,36,.55); background:rgba(251,191,36,.08); color:var(--warn); }
+  .npbtn.sess { margin-top:12px; }
+  .npline { margin:10px 0 0; color:var(--warn); font-size:13px; font-weight:700; }
+  .coach.cap { border-color:rgba(251,191,36,.35); }
+  .coach.cap .tchip { color:var(--warn); border-color:rgba(251,191,36,.45); }
+  .rpec.over { border-color:rgba(251,191,36,.6); background:rgba(251,191,36,.12); }
+  .rpec.over .rv { color:var(--warn); }
+  .capline { margin:6px 0 0; color:var(--faint); font-size:12px; font-weight:700; }
+  .sched.rot { grid-template-columns:repeat(auto-fit,minmax(56px,1fr)) !important; }
+  .sched.rot .dow { font-size:11px; white-space:nowrap; }
+  .rotnote { margin-top:8px; }
+  .bodymap { margin:4px 0 14px; }
+  .bodymap.loading { min-height:60px; }
+  .bm-pair { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .bm-col { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .bm-cap { color:var(--faint); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+  .bm-svg { width:100%; max-width:200px; height:auto; display:block; }
+  .bm-svg g { stroke:rgba(0,0,0,.55); stroke-width:1.2; }
+  .bm-svg g[onclick] { cursor:pointer; }
+  .bm-inert { fill:#2a2826; }
+  .bm-zero { fill:#3a3734; }
+  .bm-under { fill:rgba(var(--accent-rgb),.42); }
+  .bm-in { fill:var(--accent); }
+  .bm-over { fill:var(--warn); }
+  .bm-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:6px 14px; margin-top:10px; color:var(--dim); font-size:12px; font-weight:700; }
+  .bm-legend span { display:inline-flex; align-items:center; gap:6px; }
+  .bm-sw { display:inline-block; width:12px; height:12px; border-radius:3px; }
+  .bm-sw.bm-zero { background:#3a3734; } .bm-sw.bm-under { background:rgba(var(--accent-rgb),.42); }
+  .bm-sw.bm-in { background:var(--accent); } .bm-sw.bm-over { background:var(--warn); }
+  .devbadge { position:fixed; left:50%; transform:translateX(-50%); top:calc(4px + env(safe-area-inset-top)); z-index:60; pointer-events:none;
+    padding:2px 8px; border-radius:6px; background:#7c3aed; color:#fff; font-size:11px; font-weight:900; letter-spacing:.08em; }
+  </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute"><defs>
@@ -2095,16 +2131,21 @@ const LIB = {
   calves:["Standing Calf Raise","Seated Calf Raise","Calf Raise","Leg Press Calf Raise","Smith Machine Calf Raise","Donkey Calf Raise"],
   abs:["Hanging Leg Raise","Cable Crunch","Ab Machine","Hanging Knee Raise","Decline Sit-Up","Ab Wheel Rollout","Weighted Crunch"],
 };
+if (!LIB.erectors) LIB.erectors = ["Back Extension","Reverse Hyperextension","Good Morning","Superman Hold","Bird Dog"];
 const LIBNAME = {};
 Object.values(LIB).forEach(list=>list.forEach(n=>{ LIBNAME[slug(n)] = n; }));
 const BUILTIN_SCHEDULE = {1:"A",2:"C",3:"B",4:"C",5:["A","B"],6:null,0:null};
 let WORKOUTS, SCHEDULE;
 let PROG_REST = 0;
 let WEEKLY_PROG = false;   // program opt-in: repeated lifts progress only on their first session of the week
+let PROG_DEFAULT = "";     // program-level default progression rule ("double" when unset)
+let PROG_RPECAP = 0;       // program-level effort cap (RPE); 0 = no cap
+let ROT_SEQ = null;        // program-defined rotation order; null = workout order
+let PROG_PATH = "";        // program path key (male_/female_) for the body map
 function applyProgram(p){
   _planCache = Object.create(null); _planStamp = null; _pfCache = Object.create(null); _pfStamp = null;   // program data changed \u2014 plans must recompute
   if (!p || !p.workouts){
-    WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; PROG_REST = 0; WEEKLY_PROG = false; programName = "";
+    WORKOUTS = BUILTIN_WORKOUTS; SCHEDULE = BUILTIN_SCHEDULE; INC = 5; WEEK_TARGET = 5; DELOAD_EVERY = 7; PROG_REST = 0; WEEKLY_PROG = false; PROG_DEFAULT = ""; PROG_RPECAP = 0; ROT_SEQ = null; programName = "";
     if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
     return;
   }
@@ -2113,6 +2154,7 @@ function applyProgram(p){
     built[k] = { label:w.label||("Workout "+k), tag:w.tag||"", exercises:(w.exercises||[]).map(e=>({
       id:slug(e.name), name:e.name, min:e.min, max:e.max, sets:e.sets||2, cat:e.cat||null,
       note:e.note||"", bw:!!e.bw, unit:e.unit||"reps", rest:e.rest||0,
+      prog:PROGS.includes(e.prog) ? e.prog : "", rpeCap:Number(e.rpeCap)||0,
       alts:Array.isArray(e.alts) ? e.alts.map(x=>String(x||"").trim()).filter(Boolean) : []
     })) };
     built[k].exercises.forEach(e=>{ if (!LIBNAME[e.id]) LIBNAME[e.id]=e.name; });
@@ -2125,6 +2167,10 @@ function applyProgram(p){
   DELOAD_EVERY = (p.deloadEvery===0) ? 0 : (p.deloadEvery || 7);
   PROG_REST = Number(p.rest) || 0;
   WEEKLY_PROG = !!p.weeklyProgression;
+  PROG_DEFAULT = PROGS.includes(p.prog) ? p.prog : "";
+  PROG_RPECAP = Number(p.rpeCap)||0;
+  ROT_SEQ = Array.isArray(p.rotation) ? p.rotation.filter(k=>built[k]) : null;
+  if (ROT_SEQ && !ROT_SEQ.length) ROT_SEQ = null;
   // Snap to today's scheduled workout for THIS program's schedule. The boot-time pick
   // (line ~3422) used the builtin schedule and may be stale; recompute unless a same-day
   // draft explicitly selected a workout (handled in restoreDraft, which runs after this).
@@ -2134,7 +2180,7 @@ function applyProgram(p){
   const activeSession = (typeof draftWorkout!=="undefined" && draftWorkout && WORKOUTS[draftWorkout]
                          && typeof draftDay!=="undefined" && draftDay===dayKey()
                          && typeof values!=="undefined" && values && Object.keys(values).length>0);
-  const sched = scheduleFor(new Date().getDay());
+  const sched = rotationOn ? rotationPick() : scheduleFor(new Date().getDay());
   if (activeSession) workoutId = draftWorkout;                                  // mid-workout with real sets — keep it
   else if (sched && WORKOUTS[sched]) workoutId = sched;                         // otherwise TODAY's scheduled workout wins
   else if (!Object.keys(WORKOUTS).includes(workoutId)) workoutId = Object.keys(WORKOUTS)[0];
@@ -2163,7 +2209,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "15.9";
+const APP_VERSION = "16.0-dev";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2304,13 +2350,14 @@ async function ensureProfile(){
 }
 async function loadProgram(){
   if (!profile || !profile.program_id){ applyProgram(null); return; }
-  const r = await sb("/rest/v1/programs?select=name,data&id=eq."+profile.program_id);
+  const r = await sb("/rest/v1/programs?select=name,path,data&id=eq."+profile.program_id);
   if (!r.ok){ applyProgram(null); return; }
   const rows = await r.json();
   if (rows.length && rows[0].data && rows[0].data.workouts){
     window.__progRaw = rows[0].data;
     applyProgram(rows[0].data);
     programName = rows[0].name;
+    PROG_PATH = rows[0].path || "";
   } else applyProgram(null);
 }
 
@@ -2730,7 +2777,7 @@ async function saveCoachNote(athleteUid, sessId){
 let coachView = null; // {uid, sessId}
 // ---------- program builder ----------
 let progEdit = null; // {id|null, name, path, data}
-const CAT_OPTS = ["","quads","hams","glutes","chest_press","incline_press","chest_fly","row","vert_pull","sh_press","side_delt","rear_delt","biceps","triceps","calves","abs"];
+const CAT_OPTS = ["","quads","hams","glutes","chest_press","incline_press","chest_fly","row","vert_pull","sh_press","side_delt","rear_delt","biceps","triceps","calves","abs","erectors"];
 async function openProgEdit(id){
   if (!id){
     progEdit = { id:null, name:"", path:"", data:{ inc:5, weekTarget:3, deloadEvery:0, rest:120, schedule:{"0":null,"1":"A","2":null,"3":"B","4":null,"5":"C","6":null},
@@ -3106,7 +3153,9 @@ function renderTut(){
   h += T("Body & activity", "Log bodyweight (and waist) in Progress \u2014 the 30-day trend next to your training volume is the real scoreboard. Yoga, cardio, and walks log via <b>+ Log an activity</b> and count toward your weekly target.");
   h += T("Fixing mistakes", "Tap \u270E on any session in Progress \u2192 Activity to correct weights and reps, or delete it entirely. Fat-fingered a 900 lb leg press? Gone, and your PRs recalculate.");
   h += T("Warm-ups & drop sets", "Tap a set\u2019s label to mark it <b>Warm</b> or <b>Drop</b>. Warm-ups are ignored everywhere \u2014 volume, e1RM, PRs, and your next target. Drop sets count as volume but never set a PR or drive progression.");
-  h += T("RPE (optional)", "Turn on <b>Log RPE per set</b> in the \u2630 menu to record how hard each set felt (6\u201310). Tap a chip to cycle. It never changes your targets \u2014 it gives your coach the effort behind the numbers.");
+  h += T("Effort (RPE or RIR)", "Turn on <b>Log effort per set</b> in the \u2630 menu and tap a chip to rate each set. Pick <b>RPE</b> (10 = nothing left) or <b>RIR</b> (reps in reserve, 0 = nothing left) under <b>Effort scale</b>. Lifts with an effort cap show the chips automatically: if the hardest set goes past the cap, the weight holds even when you hit every rep.");
+  h += T("Progression rules", "Each lift follows a rule: <b>double</b> (climb the rep range, then add load), <b>linear</b> (hit the target reps on every set, then add load), <b>time</b> (holds and carries add 5 s), or <b>off</b> (just log it). Bad day? <b>Don\u2019t count this toward progression</b> on a lift, or on the whole session at the bottom, keeps those numbers from steering next time.");
+  h += T("Rotation", "Prefer A, B, C\u2026 in order instead of fixed weekdays? Set <b>Schedule</b> to <b>Rotation</b> in \u2630. The next session is always the one after the last you logged.");
   h += T("Found a bug?", "\u2630 menu \u2192 <b>Report a bug / suggest a feature</b>. It lands in your coach\u2019s inbox on the Coach tab \u2014 screenshots aren\u2019t supported yet, so describe what you saw.");
   h += T("WHOOP", "Connect WHOOP from this menu and your morning recovery, HRV, and sleep appear on the Session tab. Green (67%+): train as planned. Red (under 34%): the app suggests easing off \u2014 your call, or your coach\u2019s.");
   h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
@@ -3243,7 +3292,9 @@ function renderMenu(){
       +'<button class="menuitem" onclick="whoopDisconnect()">WHOOP connected \u2713 \u2014 disconnect</button>'
     : '<button class="menuitem" onclick="whoopConnect()">Connect WHOOP</button>');
   h += '<button class="menuitem" onclick="clearEnteredConfirm()">Clear entered numbers</button>';
-  h += '<button class="menuitem" onclick="toggleRpe()">Log RPE per set <span class="mstate">'+(rpeOn?"ON":"OFF")+'</span></button>';
+  h += '<button class="menuitem" onclick="toggleRpe()">Log effort per set <span class="mstate">'+(rpeOn?"ON":"OFF")+'</span></button>';
+  h += '<button class="menuitem" onclick="toggleEffScale()">Effort scale <span class="mstate">'+effName()+'</span></button>';
+  h += '<button class="menuitem" onclick="toggleRotation()">Schedule <span class="mstate">'+(rotationOn?"ROTATION":"WEEKDAYS")+'</span></button>';
   h += '<button class="menuitem" onclick="toggleFeedback()">Report a bug / suggest a feature</button>';
   h += '<a class="menuitem menulink" href="privacy.html">Privacy policy</a>';
   h += '<button class="menuitem" onclick="togglePlates()">Plate calculator</button>';
@@ -3268,7 +3319,7 @@ function saveBootCache(){
   try {
     localStorage.setItem(BOOT_CACHE, JSON.stringify({
       uid: auth.uid,
-      profile, programName,
+      profile, programName, progPath: PROG_PATH,
       program: window.__progRaw || null,
       whoopRec, whoopDays, whoopAllWorkouts, whoopBody,
       myCoachNotes,
@@ -3282,6 +3333,7 @@ function hydrateBootCache(){
     profile = c.profile || profile;
     if (c.program){ window.__progRaw = c.program; applyProgram(c.program); }
     programName = c.programName || programName;
+    PROG_PATH = c.progPath || PROG_PATH;
     whoopRec = c.whoopRec || null;
     whoopDays = c.whoopDays || [];
     whoopAllWorkouts = c.whoopAllWorkouts || [];
@@ -3342,6 +3394,69 @@ let sessionsRev = 0;                     // bumped on EVERY sessions mutation (i
 function bumpSessions(){ sessionsRev++; }
 let deloadSkips = [];
 let stallMutes = [];
+// ---- v16: progression rules ----
+const PROGS = ["double","linear","time","off"];
+function policyOf(e){
+  if (e && PROGS.includes(e.prog)) return e.prog;
+  if (PROG_DEFAULT) return PROG_DEFAULT;
+  return (e && e.unit==="sec") ? "time" : "double";
+}
+const TIME_STEP = 5;
+// ---- v16: effort scale (stored as RPE on every set; RIR = 10 - RPE) ----
+const EFF_KEY = "iron-log-effort";
+let effScale = "rpe";
+try { if (localStorage.getItem(EFF_KEY)==="rir") effScale = "rir"; } catch(e){}
+function toggleEffScale(){ effScale = effScale==="rpe" ? "rir" : "rpe"; try{ localStorage.setItem(EFF_KEY, effScale); }catch(e){} render(); }
+function effShow(rpe){ if (rpe==null || rpe==="") return ""; const n=Number(rpe); return effScale==="rir" ? String(Math.max(0,10-n)) : String(n); }
+function effName(){ return effScale==="rir" ? "RIR" : "RPE"; }
+function effPhrase(rpe){ return effScale==="rir" ? "RIR "+effShow(rpe) : "RPE "+effShow(rpe); }
+function maxEffort(sets){ const v=(sets||[]).map(x=>Number(x.e)).filter(x=>x>0); return v.length ? Math.max(...v) : 0; }
+// ---- v16: rotation mode (per device) ----
+const ROT_KEY = "iron-log-rotation";
+let rotationOn = false;
+try { rotationOn = localStorage.getItem(ROT_KEY)==="1"; } catch(e){}
+function rotationSeq(){ return (ROT_SEQ && ROT_SEQ.length) ? ROT_SEQ.slice() : Object.keys(WORKOUTS||{}); }
+function lastRotationSession(){
+  const seq = rotationSeq();
+  for (let i=sessions.length-1;i>=0;i--){
+    const x = sessions[i];
+    if (x.activity || !sameProg(x) || !seq.includes(x.workout)) continue;
+    return x;
+  }
+  return null;
+}
+// Next workout = the one after the last session you logged, whatever the weekday.
+// If today's session is already logged, today stays on it.
+function rotationPick(){
+  const seq = rotationSeq(); if (!seq.length) return null;
+  const last = lastRotationSession();
+  if (!last) return seq[0];
+  if (dayKey(new Date(last.date))===dayKey()) return last.workout;
+  return seq[(seq.indexOf(last.workout)+1) % seq.length];
+}
+function rotationNextAfterToday(){
+  const seq = rotationSeq(); if (!seq.length) return null;
+  const last = lastRotationSession();
+  if (!last) return seq[0];
+  return seq[(seq.indexOf(last.workout)+1) % seq.length];
+}
+function toggleRotation(){
+  rotationOn = !rotationOn;
+  try { localStorage.setItem(ROT_KEY, rotationOn?"1":"0"); } catch(e){}
+  const hasVals = values && Object.keys(values).some(k=>(values[k]||[]).some(r=>r && (r.w!==""||r.r!=="")));
+  if (!hasVals){
+    const pick = rotationOn ? rotationPick() : scheduleFor(new Date().getDay());
+    if (pick && WORKOUTS[pick]) workoutId = pick;
+  }
+  toast(rotationOn ? "Rotation on \u2014 next session is the next one you haven\u2019t done." : "Weekday schedule back on.");
+  render();
+}
+// ---- v16: keep a session or one lift out of progression ----
+let noProgDraft = {};    // exId -> true for this session
+let sessNoProg = false;  // whole session excluded
+function progExcluded(s, exId){ return !!s && (s.noProg===true || (Array.isArray(s.noProg) && s.noProg.includes(exId))); }
+function toggleNoProg(exId){ if (noProgDraft[exId]) delete noProgDraft[exId]; else noProgDraft[exId]=true; saveDraft(); render(); }
+function toggleSessNoProg(){ sessNoProg = !sessNoProg; saveDraft(); render(); }
 const RPE_KEY = "iron-log-rpe";
 let rpeOn = false;
 try { rpeOn = localStorage.getItem(RPE_KEY)==="1"; } catch(e){}
@@ -3457,7 +3572,7 @@ const DRAFT_TTL = 12*3600*1000;
 let _draftTimer = null;
 function _flushDraft(){
   _draftTimer = null;
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), day:draftDay, workoutId, values, subs, sessionNote, noteDrafts, wkStart})); } catch(e){}
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), day:draftDay, workoutId, values, subs, sessionNote, noteDrafts, wkStart, noProgDraft, sessNoProg})); } catch(e){}
 }
 function saveDraft(){
   if (_draftTimer) clearTimeout(_draftTimer);
@@ -3472,7 +3587,7 @@ try {
   window.addEventListener("pagehide", ()=>{ if (_draftTimer){ clearTimeout(_draftTimer); _flushDraft(); } });
 } catch(e){}
 function clearEntered(silent){
-  values={}; subs={}; sessionNote=""; noteDrafts={};
+  values={}; subs={}; sessionNote=""; noteDrafts={}; noProgDraft={}; sessNoProg=false;
   adjustOpen=null; pickerFor=null; noteOpen=null;
   wkStart=0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
   stopRest(); clearDraft(); draftDay = dayKey();
@@ -3511,7 +3626,7 @@ function effEx(wid){
   return WORKOUTS[wid].exercises.map(p=>{
     const nm = subs[wid+":"+p.id];
     if (!nm || slug(nm)===p.id) return p;
-    return {id:slug(nm), name:nm, min:p.min, max:p.max, sets:p.sets, cat:p.cat, alts:p.alts||[], subOf:p};
+    return {id:slug(nm), name:nm, min:p.min, max:p.max, sets:p.sets, cat:p.cat, alts:p.alts||[], prog:p.prog||"", rpeCap:p.rpeCap||0, unit:p.unit, subOf:p};
   });
 }
 let lastTabRendered = null;
@@ -3555,9 +3670,10 @@ function weekKey(iso){
   _wkCache[iso]=k; _wkCacheN++;
   return k;
 }
-function lastEntryFor(exId){
+function lastEntryFor(exId, includeExcluded){
   for (let i=sessions.length-1;i>=0;i--){
     if (!sameProg(sessions[i])) continue;
+    if (!includeExcluded && progExcluded(sessions[i], exId)) continue;
     const sets = workSets(sessions[i].entries && sessions[i].entries[exId]);
     if (sets && sets.some(s=>s.r>0)) return {sets:sets.filter(s=>s.r>0), date:sessions[i].date};
   }
@@ -3567,7 +3683,7 @@ function lastEntryFor(exId){
 function entriesByWeek(exId){
   const by = {};
   for (const s of sessions){
-    if (!sameProg(s)) continue;
+    if (!sameProg(s) || progExcluded(s, exId)) continue;
     const sets = workSets(s.entries && s.entries[exId]);
     if (!sets || !sets.some(x=>x.r>0)) continue;
     const k = weekKey(s.date);
@@ -3584,7 +3700,7 @@ function firstOfWeekHistory(exId, n){
 function historyFor(exId, n){
   const out=[];
   for (let i=sessions.length-1;i>=0 && out.length<n;i--){
-    if (!sameProg(sessions[i])) continue;
+    if (!sameProg(sessions[i]) || progExcluded(sessions[i], exId)) continue;
     const sets = workSets(sessions[i].entries && sessions[i].entries[exId]);
     if (sets && sets.length) out.push({sets, date:sessions[i].date});
   }
@@ -3626,6 +3742,12 @@ function planFor(e){
 }
 function _planForRaw(e){
   let last = lastEntryFor(e.id);
+  const pol = policyOf(e);
+  if (pol==="off"){
+    if (!last) return {mode:"off", sets:null, last:null, pol};
+    return {mode:"off", last, pol, topW:Math.max(...last.sets.map(s=>s.w||0)),
+      sets:last.sets.map(s=>({w:e.bw?0:(s.w||0), r:s.r}))};
+  }
   if (WEEKLY_PROG && last){
     const by = entriesByWeek(e.id);
     const today = new Date(); const todayK = weekKey(today.toISOString()); const todayD = today.toDateString();
@@ -3641,7 +3763,7 @@ function _planForRaw(e){
     const prior = Object.keys(by).filter(k=>k<todayK).sort();
     if (prior.length) last = by[prior[prior.length-1]][0];
   }
-  if (!last) return {mode:"baseline", sets:null, last:null};
+  if (!last) return {mode:"baseline", sets:null, last:null, pol};
   const topW = Math.max(...last.sets.map(s=>s.w||0));
   if (deloadActive()){
     const n0 = Math.max(e.sets, Math.min(last.sets.length, 6));
@@ -3649,14 +3771,74 @@ function _planForRaw(e){
       sets:Array.from({length:n0},()=>({w: e.bw?0:round5(topW*0.5), r:e.min}))};
   }
   const n = Math.max(e.sets, Math.min(last.sets.length, 6));
-  if (last.sets.every(s=>s.r>=e.max)){
-    if (e.bw) return {mode:"add", last, topW:0, bw:true,
+  const enough = last.sets.length >= e.sets;
+  const eff = maxEffort(last.sets), cap = e.rpeCap || PROG_RPECAP;
+  const capped = !!(cap && eff && eff > cap);
+  if (pol==="time"){
+    // timed holds and carries: hit the top of the range on every set, then add time (load stays)
+    const lo = Math.min(...last.sets.map(s=>s.r));
+    if (enough && last.sets.every(s=>s.r>=e.max)){
+      if (capped) return {mode:"capped", last, topW, eff, cap, pol,
+        sets:Array.from({length:n},(_,i)=>({w:e.bw?0:topW, r:last.sets[i]?last.sets[i].r:lo}))};
+      return {mode:"addtime", last, topW, pol,
+        sets:Array.from({length:n},()=>({w:e.bw?0:topW, r:lo+TIME_STEP}))};
+    }
+    return {mode:"beat", last, topW, pol,
+      sets:Array.from({length:n},(_,i)=>({w:e.bw?0:topW, r: last.sets[i] ? Math.min(last.sets[i].r+TIME_STEP, Math.max(e.max,last.sets[i].r)) : e.min}))};
+  }
+  // linear: hit the target reps (bottom of the range) on every set -> add load.
+  // double (default): climb to the top of the range on every set -> add load.
+  const goal = pol==="linear" ? e.min : e.max;
+  if (enough && last.sets.every(s=>s.r>=goal) || (!enough && pol==="double" && last.sets.every(s=>s.r>=e.max))){
+    if (capped) return {mode:"capped", last, topW, eff, cap, pol,
+      sets:Array.from({length:n},(_,i)=>({w:e.bw?0:topW, r: pol==="linear" ? e.min : (last.sets[i]?Math.min(last.sets[i].r,e.max):e.min)}))};
+    if (e.bw) return {mode:"add", last, topW:0, bw:true, pol,
       sets:Array.from({length:n},()=>({w:0, r:e.max}))};
-    return {mode:"add", last, topW,
+    return {mode:"add", last, topW, pol,
       sets:Array.from({length:n},()=>({w:topW+INC, r:e.min}))};
   }
-  return {mode:"beat", last, topW,
+  if (pol==="linear") return {mode:"beat", last, topW, pol,
+    sets:Array.from({length:n},()=>({w:e.bw?0:topW, r:e.min}))};
+  return {mode:"beat", last, topW, pol,
     sets:Array.from({length:n},(_,i)=>({w:e.bw?0:topW, r: last.sets[i] ? Math.min(last.sets[i].r+1, e.max) : e.min}))};
+}
+function rngTxt(e){ return e.min===e.max ? String(e.min) : e.min+"\u2013"+e.max; }
+function unitTxt(e){ return e.unit==="sec" ? "seconds" : "reps"; }
+function explanText(e, plan){
+  switch (plan.mode){
+    case "deload": return "deload";
+    case "add": return "\u25B2 +"+INC+" lb";
+    case "addtime": return "\u25B2 +"+TIME_STEP+" s";
+    case "capped": return "capped";
+    case "hold": return e.bw ? "hold" : "hold "+plan.topW;
+    case "beat": return "beat "+plan.last.sets.map(s=>s.r).join("/");
+    default: return "";
+  }
+}
+function coachChip(plan){
+  return ({add:"\u25B2 Add weight", addtime:"\u25B2 Add time", capped:"Effort cap", beat:"Beat last", deload:"Deload",
+    hold:"Hold weight", off:"Log it"})[plan.mode] || "Baseline";
+}
+function coachCopy(e, plan){
+  const ls = plan.last ? plan.last.sets : [];
+  switch (plan.mode){
+    case "deload": return e.bw ? "Deload \u2014 easy sets of "+e.min+", stop far from failure."
+      : "Deload \u2014 half load: "+plan.sets[0].w+" lb \u00D7 "+e.min+". Stop 4\u20135 reps shy of failure.";
+    case "add": return e.bw ? "Maxed the range every set. Push past "+e.max+" "+unitTxt(e)+" or add load."
+      : (plan.pol==="linear" ? "Hit "+e.min+" on every set last time. Load "+plan.sets[0].w+" lb, "+e.min+" reps."
+        : "Hit "+e.max+"+ on all sets last time. Load "+plan.sets[0].w+" lb, target "+rngTxt(e)+" reps.");
+    case "addtime": return "Held "+e.max+"+ s on every set. Add time: "+plan.sets[0].r+" s"+(e.bw?"":" at "+plan.topW+" lb")+".";
+    case "capped": return "Reps were there, but the hardest set was "+effPhrase(plan.eff)+" (cap "+effPhrase(plan.cap)+"). Same "+(e.bw?"reps":plan.topW+" lb")+" \u2014 the weight goes up once it moves easier.";
+    case "hold": return e.bw ? "Repeat this week \u2014 match the range ("+rngTxt(e)+" "+unitTxt(e)+"). Progression happens on your first session of the week."
+      : "Repeat this week \u2014 hold "+plan.topW+" lb from "+new Date(plan.last.date).toLocaleDateString(undefined,{weekday:"long"})+", "+rngTxt(e)+" crisp reps. Weight only goes up on your first session of the week.";
+    case "beat":
+      if (plan.pol==="linear") return "Missed reps last time ("+ls.map(s=>s.r).join(" / ")+"). Same "+plan.topW+" lb \u2014 get "+e.min+" on every set.";
+      if (plan.pol==="time") return "Beat last: "+ls.map(s=>s.r).join(" / ")+" s \u2192 "+plan.sets.map(s=>s.r).join(" / ")+" s.";
+      return e.bw ? "Beat last: "+ls.map(s=>s.r).join(" / ")+" \u2192 "+plan.sets.map(s=>s.r).join(" / ")+"."
+        : "Stay at "+plan.topW+" lb. Beat last: "+ls.map(s=>s.r).join(" / ")+" \u2192 "+plan.sets.map(s=>s.r).join(" / ")+".";
+    case "off": return plan.last ? "No auto-progression on this one. Log what you did; last time is shown below." : "No auto-progression on this one. Log what you did.";
+    default: return "First session \u2014 set a baseline you can hit for "+rngTxt(e)+" clean "+unitTxt(e)+".";
+  }
 }
 // ===== Weekly working sets per muscle group (volume landmarks) =====
 // Counts WORKING sets only: warm-ups and drop sets are not independent hard sets.
@@ -3695,6 +3877,41 @@ function plannedGroupSets(){
   }
   return g;
 }
+// ===== Muscle map (geometry: MuscleMap by Melih Colpan, MIT; loaded on demand from bodymap.json) =====
+let BODY = null, bodyLoading = false, bodyView = "front";
+function loadBody(){
+  if (BODY || bodyLoading) return; bodyLoading = true;
+  fetch("bodymap.json").then(r=>r.ok?r.json():null).then(j=>{ BODY = j; bodyLoading = false; if (j && tab==="progress") render(); })
+    .catch(()=>{ bodyLoading = false; });
+}
+const GROUP_SLUGS = { Quads:["quadriceps"], Hamstrings:["hamstring"], Glutes:["gluteal"], Chest:["chest"],
+  Back:["upperBack","trapezius"], Shoulders:["deltoids"], Biceps:["biceps"], Triceps:["triceps"],
+  Calves:["calves"], Core:["abs","obliques"], "Lower back":["lowerBack"] };
+function bodySex(){ return /^female/.test(PROG_PATH||"") ? "female" : "male"; }
+function setBodyView(v){ bodyView = v; render(); }
+function tapMuscle(g){ const cur = weeklyGroupSets(weekKey(new Date().toISOString())); toast(g+" \u00B7 "+(cur[g]||0)+" working sets this week"); }
+function bodyMapHtml(cur, lo, hi){
+  if (!BODY){ loadBody(); return '<div class="bodymap loading"><p class="statline">Loading muscle map\u2026</p></div>'; }
+  const sexData = BODY[bodySex()] || BODY.male;
+  const slugGroup = {}; for (const [g,sl] of Object.entries(GROUP_SLUGS)) sl.forEach(x=>{ slugGroup[x]=g; });
+  const views = ["front","back"].map(v=>{
+    const d = sexData[v]; const vb = d.vb.join(" ");
+    let svg = '<svg class="bm-svg" viewBox="'+vb+'" role="img" aria-label="'+v+' view">';
+    for (const [slug, paths] of Object.entries(d.p)){
+      const g = slugGroup[slug];
+      let cls = "bm-inert", attr = "";
+      if (g){
+        const n = cur[g]||0;
+        cls = n===0 ? "bm-zero" : n<lo ? "bm-under" : n>hi ? "bm-over" : "bm-in";
+        attr = ' onclick="tapMuscle(\''+g+'\')"';
+      }
+      svg += '<g class="'+cls+'"'+attr+'>'+(g?'<title>'+esc(g)+': '+(cur[g]||0)+' sets</title>':'')+paths.map(pd=>'<path d="'+pd+'"/>').join("")+'</g>';
+    }
+    return svg + '</svg>';
+  });
+  return '<div class="bodymap"><div class="bm-pair"><div class="bm-col"><span class="bm-cap">Front</span>'+views[0]+'</div><div class="bm-col"><span class="bm-cap">Back</span>'+views[1]+'</div></div>'
+    +'<div class="bm-legend"><span><i class="bm-sw bm-zero"></i>0</span><span><i class="bm-sw bm-under"></i>Under '+lo+'</span><span><i class="bm-sw bm-in"></i>'+lo+'\u2013'+hi+'</span><span><i class="bm-sw bm-over"></i>Over '+hi+'</span></div></div>';
+}
 function groupSetsPanel(){
   const thisW = weekKey(new Date().toISOString());
   const cur = weeklyGroupSets(thisW);
@@ -3706,6 +3923,7 @@ function groupSetsPanel(){
   const scaleMax = Math.max(hi+4, ...names.map(n=>cur[n]||0));
   let h = '<h2 class="sect disp a">Weekly sets by muscle</h2><div class="panel a">';
   h += '<p class="statline">Working sets logged this week \u00B7 reference band <b class="num">'+lo+'\u2013'+hi+'</b></p>';
+  h += bodyMapHtml(cur, lo, hi);
   h += '<div class="wsrows">';
   names.forEach(n=>{
     const v = cur[n]||0;
@@ -3786,7 +4004,9 @@ function metricDelta(days){
   return +(cur.w - base.w).toFixed(1);
 }
 // ================= Analytics =================
-function e1rm(w,r){ return r>0 && w>0 ? Math.round(w*(1+r/30)) : 0; }
+// Epley is a submaximal estimator; past ~12 reps it measures work capacity, not strength.
+const E1RM_REP_CAP = 12;
+function e1rm(w,r){ return r>0 && r<=E1RM_REP_CAP && w>0 ? Math.round(w*(1+r/30)) : 0; }
 function catOf(exId){
   for (const w of Object.values(WORKOUTS)) for (const e of w.exercises) if (e.id===exId && e.cat) return e.cat;
   for (const [cat,list] of Object.entries(LIB)) if (list.some(n=>slug(n)===exId)) return cat;
@@ -3796,17 +4016,17 @@ const CAT_GROUP = { quads:"Quads", hams:"Hamstrings", glutes:"Glutes",
   chest_press:"Chest", incline_press:"Chest", chest_fly:"Chest",
   row:"Back", vert_pull:"Back",
   sh_press:"Shoulders", side_delt:"Shoulders", rear_delt:"Shoulders",
-  biceps:"Biceps", triceps:"Triceps", calves:"Calves", abs:"Core" };
+  biceps:"Biceps", triceps:"Triceps", calves:"Calves", abs:"Core", erectors:"Lower back" };
 // Plain-language category aliases. Hand-written programs commonly use "back"/"chest"/
 // "shoulders"/"core"; map them onto the canonical buckets so analytics and the swap
 // picker work without rewriting program data.
 const CAT_ALIAS = { back:"row", chest:"chest_press", shoulders:"sh_press", core:"abs",
   hamstrings:"hams", ham:"hams", quad:"quads", glute:"glutes", bicep:"biceps", tricep:"triceps",
-  calf:"calves", delts:"sh_press", lats:"vert_pull", pull:"vert_pull", push:"chest_press" };
+  calf:"calves", delts:"sh_press", lats:"vert_pull", pull:"vert_pull", push:"chest_press", lower_back:"erectors", lowerback:"erectors" };
 Object.assign(CAT_GROUP, { back:"Back", chest:"Chest", shoulders:"Shoulders", core:"Core",
   hamstrings:"Hamstrings", ham:"Hamstrings", quad:"Quads", glute:"Glutes",
   bicep:"Biceps", tricep:"Triceps", calf:"Calves", delts:"Shoulders", lats:"Back",
-  pull:"Back", push:"Chest" });
+  pull:"Back", push:"Chest", lower_back:"Lower back", lowerback:"Lower back" });
 // Give the swap picker a list for each alias by merging the canonical sublists.
 (function(){
   const merge = (...keys)=>keys.flatMap(k=>LIB[k]||[]);
@@ -3885,7 +4105,7 @@ function liftAnalytics(exId){
     if (!ws.length) continue;
     const topW = Math.max(...ws.map(x=>x.w||0));
     const bestSet = ws.reduce((a,x)=> e1rm(x.w,x.r)>e1rm(a.w,a.r)?x:a, ws[0]);
-    rows.push({date:s.date, sets, topW, bestR:Math.max(...ws.map(x=>x.r)), e1:s.deload?null:e1rm(bestSet.w,bestSet.r), deload:!!s.deload});
+    rows.push({date:s.date, sets, topW, bestR:Math.max(...ws.map(x=>x.r)), e1:(s.deload||!e1rm(bestSet.w,bestSet.r))?null:e1rm(bestSet.w,bestSet.r), deload:!!s.deload});
   }
   return rows;
 }
@@ -4104,12 +4324,26 @@ function readinessRing(score){
     +'stroke-dasharray="'+C+'" stroke-dashoffset="'+(C*(1-frac))+'" transform="rotate(-90 40 40)" class="ringarc"/>'
     +'</svg>'+(sc!=null?'<span class="ringsat" style="--sat:'+ang+'deg"></span>':'')+'<div class="ringlbl"><span class="rv num">'+(sc==null?"\u2013":sc)+'</span><span class="rl">'+(sc==null?"no data":"recovery")+'</span></div></div>';
 }
+function rotationStrip(){
+  const seq = rotationSeq(); const next = rotationNextAfterToday(); const pick = rotationPick();
+  const lastDone = {};
+  for (const x of sessions){ if (!x.activity && sameProg(x) && seq.includes(x.workout)) lastDone[x.workout] = x.date; }
+  let h = '<h2 class="sect disp a">Rotation</h2><div class="sched rot a">';
+  seq.forEach(k=>{
+    const w = WORKOUTS[k];
+    const isSel = k===workoutId, isNext = k===pick;
+    h += '<div class="day'+(isNext?" today":"")+(isSel?" sel":"")+'" onclick="setWorkout(\''+k+'\')" role="button" tabindex="0" aria-label="'+esc(w.label)+'">'
+      +'<span class="dow">'+(isNext?(pick===next?"Next":"Today"):(lastDone[k]?fmtDate(lastDone[k]):"\u2014"))+'</span><span class="wk">'+esc(k)+'</span></div>';
+  });
+  h += '</div><p class="statline rotnote">Next up is the session after the last one you logged, whatever the weekday. Switch back in \u2630.</p>';
+  return h;
+}
 function renderTrain(){
   const w = WORKOUTS[workoutId];
   const _now = new Date();                       // §3: one Date per render
   const todayDow = _now.getDay();
   const dayName = _now.toLocaleDateString(undefined,{weekday:"long"});
-  const todayW = scheduleFor(todayDow);
+  const todayW = rotationOn ? rotationPick() : scheduleFor(todayDow);
 
   const exs = effEx(workoutId);
   // §1: plans/stalls depend only on (sessions, deloadSkips, program, subs, current week) —
@@ -4122,7 +4356,7 @@ function renderTrain(){
     const plans = {}; let readyCount=0; const stallsRaw=[];
     for (const e of exs){
       plans[e.id] = planFor(e);                                   // planFor -> workSets(): invariant preserved
-      if (plans[e.id].mode==="add") readyCount++;
+      if (plans[e.id].mode==="add"||plans[e.id].mode==="addtime") readyCount++;
       if (isStalled(e.id)) stallsRaw.push({id:e.id, name:e.name});
     }
     _pc = _planCache[workoutId] = {plans, readyCount, stallsRaw};
@@ -4243,6 +4477,8 @@ function renderTrain(){
         +'<p class="statline">'+fmtDate(un.created_at)+' \u00B7 <button class="silink" onclick="markNotesSeen()">Got it</button></p></div>';
     }
   }
+  if (rotationOn) h += rotationStrip();
+  else {
   h += '<h2 class="sect disp a">Week</h2><div class="sched a">';
   const days = [["Mon",1],["Tue",2],["Wed",3],["Thu",4],["Fri",5],["Sat",6],["Sun",0]];
   // find which day to mark as "selected": prefer today if it matches the active workout,
@@ -4259,6 +4495,7 @@ function renderTrain(){
       +'<span class="dow">'+nm+'</span><span class="wk">'+(wk||'\u2013')+'</span></div>';
   }
   h += '</div>';
+  }
 
   // ===== Exercise cards =====
   h += '<h2 class="sect disp a">'+esc(w.label)+'</h2><div class="exlist">';
@@ -4272,32 +4509,25 @@ function renderTrain(){
       +'<button class="exnamebtn" onclick="openPicker(\''+presId+'\')" aria-label="swap '+esc(e.name)+'">'
       +'<h3 class="exname disp">'+esc(e.name)+' <span class="swapic">\u21C4</span></h3>'
       +(e.subOf?'<span class="subnote">sub for '+esc(e.subOf.name)+'</span>':'')
-      +'<span class="exrx num">'+e.sets+' \u00D7 '+e.min+'\u2013'+e.max+' '+(e.unit==="sec"?"sec":"reps")+'</span>'
+      +'<span class="exrx num">'+e.sets+' \u00D7 '+rngTxt(e)+' '+(e.unit==="sec"?"sec":"reps")+(policyOf(e)!=="double"&&policyOf(e)!=="time"||(policyOf(e)==="time"&&e.unit!=="sec")?' \u00B7 '+policyOf(e):'')+'</span>'
       +(e.note?'<span class="exnote">'+esc(e.note)+'</span>':'')
       +'</button>'
       +(e.bw?'':'<button class="notebtn" onclick="openPlatesFor(\''+e.id+'\')" aria-label="plates for '+esc(e.name)+'"><svg width="17" height="11" viewBox="0 0 22 12" fill="currentColor"><rect x="0" y="3" width="2.5" height="6" rx="1"/><rect x="3.5" y="1" width="3" height="10" rx="1"/><rect x="15.5" y="1" width="3" height="10" rx="1"/><rect x="19.5" y="3" width="2.5" height="6" rx="1"/><rect x="6.5" y="5" width="9" height="2" rx="1"/></svg></button>')
       +'<button class="notebtn'+((noteDrafts[e.id]&&noteDrafts[e.id].trim())||noteOpen===e.id?" on":"")+'" onclick="toggleNote(\''+e.id+'\')" aria-label="note for '+esc(e.name)+'">\u270E</button>'
-      +((plan.mode==="deload"||plan.mode==="add"||plan.mode==="beat"||plan.mode==="hold") ? '<span class="explan num'+(plan.mode==="add"?" hot":"")+'">'
-      +(plan.mode==="deload" ? "deload" : plan.mode==="add" ? "\u25B2 +"+INC+" lb" : plan.mode==="hold" ? (e.bw ? "hold" : "hold "+plan.topW) : "beat "+plan.last.sets.map(s=>s.r).join("/"))
-      +'</span>' : '')+'</div>';
+      +(explanText(e, plan) ? '<span class="explan num'+((plan.mode==="add"||plan.mode==="addtime")?" hot":"")+'">'+explanText(e, plan)+'</span>' : '')+'</div>';
     // coach box
-    const adv = (plan.mode==="add"||plan.mode==="beat") ? recAdvice() : null;
-    h += '<div class="coach'+(plan.mode==="add"?" add":plan.mode==="deload"?" dl":"")+(adv?" rec"+adv.lvl:"")+'"><span class="coachlbl">Coach</span>'
-      +'<span class="tchip">'+(plan.mode==="add"?"\u25B2 Add weight":plan.mode==="beat"?"Beat last":plan.mode==="deload"?"Deload":plan.mode==="hold"?"Hold weight":"Baseline")+'</span>'
+    const adv = (plan.mode==="add"||plan.mode==="beat"||plan.mode==="addtime") ? recAdvice() : null;
+    const excl = sessNoProg || !!noProgDraft[e.id];
+    h += '<div class="coach'+((plan.mode==="add"||plan.mode==="addtime")?" add":plan.mode==="deload"?" dl":plan.mode==="capped"?" cap":"")+(adv?" rec"+adv.lvl:"")+'"><span class="coachlbl">Coach</span>'
+      +'<span class="tchip">'+coachChip(plan)+'</span>'
       +(adv?'<span class="tchip rec '+adv.lvl+'">'+adv.chip+'</span>':'')
-      +'<p class="coachcopy">'+esc(
-        plan.mode==="deload" ? (e.bw ? "Deload \u2014 easy sets of "+e.min+", stop far from failure."
-          : "Deload \u2014 half load: "+plan.sets[0].w+" lb \u00D7 "+e.min+". Stop 4\u20135 reps shy of failure.")
-        : plan.mode==="add" ? (e.bw ? "Maxed the range every set. Push past "+e.max+" "+(e.unit==="sec"?"seconds":"reps")+" or add load."
-          : "Hit "+e.max+"+ on all sets last time. Load "+plan.sets[0].w+" lb, target "+e.min+"\u2013"+e.max+" reps.")
-        : plan.mode==="hold" ? (e.bw ? "Repeat this week \u2014 match the range ("+(e.min===e.max?e.min:e.min+"\u2013"+e.max)+" "+(e.unit==="sec"?"seconds":"reps")+"). Progression happens on your first session of the week."
-          : "Repeat this week \u2014 hold "+plan.topW+" lb from "+new Date(plan.last.date).toLocaleDateString(undefined,{weekday:"long"})+", "+(e.min===e.max?e.min:e.min+"\u2013"+e.max)+" crisp reps. Weight only goes up on your first session of the week.")
-        : plan.mode==="beat" ? (e.bw ? "Beat last: "+plan.last.sets.map(s=>s.r).join(" / ")+" \u2192 "+plan.sets.map(s=>s.r).join(" / ")+"."
-          : "Stay at "+plan.topW+" lb. Beat last: "+plan.last.sets.map(s=>s.r).join(" / ")+" \u2192 "+plan.sets.map(s=>s.r).join(" / ")+".")
-        : "First session \u2014 set a baseline you can hit for "+e.min+"\u2013"+e.max+" clean "+(e.unit==="sec"?"seconds":"reps")+".")+'</p>'+(adv?'<p class="coachrec '+adv.lvl+'">'+esc(adv.copy)+'</p>':'')+'';
+      +'<p class="coachcopy">'+esc(coachCopy(e, plan))+'</p>'+(adv?'<p class="coachrec '+adv.lvl+'">'+esc(adv.copy)+'</p>':'')+'';
     if (noteOpen===e.id)
       h += '<input class="exnoteinput" placeholder="Note \u2014 e.g. knee tweaked on set 2" value="'+esc(noteDrafts[e.id]||"")+'" onchange="setNoteDraft(\''+e.id+'\',this.value)">';
-    if (plan.last) h += '<p class="lastline num">Last: '+plan.last.sets.map(s=>(e.bw? s.r : s.w+"\u00D7"+s.r)).join(", ")+' ('+fmtDate(plan.last.date)+')</p>';
+    if (plan.last) h += '<p class="lastline num">Last: '+plan.last.sets.map(s=>(e.bw? s.r : s.w+"\u00D7"+s.r)+(s.e?' @'+effShow(s.e):'')).join(", ")+' ('+fmtDate(plan.last.date)+')</p>';
+    if (sessNoProg) h += '<p class="npline on">Not counting toward progression \u00B7 whole session</p>';
+    else h += '<button class="npbtn'+(excl?" on":"")+'" onclick="toggleNoProg(\''+e.id+'\')" aria-pressed="'+excl+'">'
+      +(excl ? 'Not counting toward progression \u00B7 undo' : 'Don\u2019t count this toward progression')+'</button>';
     h += '</div>';
     // set rows: always open
     h += '<div class="adjinner" style="padding-top:12px">';
@@ -4313,14 +4543,16 @@ function renderTrain(){
     });
     if (!e.bw && plan.sets && rows.every(s=>s.w===""))
       h += '<button class="prefillbtn" onclick="prefillPlan(\''+e.id+'\')">Prefill '+plan.sets[0].w+' lb</button>';
-    if (rpeOn && rows.length){
-      h += '<div class="rpestrip"><span class="rpelbl">RPE</span>';
+    if ((rpeOn || e.rpeCap || PROG_RPECAP) && rows.length){
+      const capV = e.rpeCap || PROG_RPECAP;
+      h += '<div class="rpestrip"><span class="rpelbl">'+effName()+'</span>';
       rows.forEach((row,si)=>{
         const v = row.e || "";
-        h += '<button class="rpec'+(v?" set":"")+'" onclick="cycleRpe(\''+e.id+'\','+si+')" aria-label="RPE for set '+(si+1)+'">'
-          +'<span class="rn num">'+(si+1)+'</span><span class="rv num">'+(v||"\u2013")+'</span></button>';
+        h += '<button class="rpec'+(v?" set":"")+(v && capV && Number(v)>capV?" over":"")+'" onclick="cycleRpe(\''+e.id+'\','+si+')" aria-label="'+effName()+' for set '+(si+1)+'">'
+          +'<span class="rn num">'+(si+1)+'</span><span class="rv num">'+(v?effShow(v):"\u2013")+'</span></button>';
       });
       h += '</div>';
+      if (capV) h += '<p class="capline">Effort cap '+effPhrase(capV)+' \u00B7 harder than that and the weight holds</p>';
     }
     if (rows.length<6) h += '<button class="addset" onclick="addSet(\''+e.id+'\')">+ Add set</button>';
     if (i===0) h += '<p class="typehint">Tap a set label to mark it <b>Warm</b> or <b>Drop</b>.</p>';
@@ -4331,7 +4563,9 @@ function renderTrain(){
 
   // ===== Session note =====
   h += '<div class="panel a" style="margin-top:12px"><h2 class="sect disp" style="margin:0 0 8px">Session notes</h2>'
-    +'<textarea class="sessnote" placeholder="How did it go? Anything your coach should see?" onchange="setSessNote(this.value)">'+esc(sessionNote)+'</textarea></div>';
+    +'<textarea class="sessnote" placeholder="How did it go? Anything your coach should see?" onchange="setSessNote(this.value)">'+esc(sessionNote)+'</textarea>'
+    +'<button class="npbtn sess'+(sessNoProg?" on":"")+'" onclick="toggleSessNoProg()" aria-pressed="'+sessNoProg+'">'
+    +(sessNoProg ? 'Whole session kept out of progression \u00B7 undo' : 'Bad day or injury? Keep this whole session out of progression')+'</button></div>';
   // ===== Save bar =====
   const t = sessionTally(w);
   h += '<div class="savebar"><div class="savein">'
@@ -4357,7 +4591,7 @@ function renderPicker(presId){
     + '</div>';
   for (const nm of options){
     const id = slug(nm);
-    const last = lastEntryFor(id);
+    const last = lastEntryFor(id, true);
     const on = nm===curName;
     h += '<button class="opt'+(on?" on":"")+'" onclick="pickLift(\''+presId+'\', this.dataset.n)" data-n="'+esc(nm)+'">'
       +'<span class="optname">'+esc(nm)+(nm===pres.name?' <span class="prescribed">prescribed</span>':'')+'</span>'
@@ -4568,6 +4802,8 @@ function saveSession(){
     if (mins>=1 && mins<=360) sess.mins = mins;   // sanity: ignore <1 min and >6 h (left running)
   }
   if (isDl) sess.deload = true;
+  if (sessNoProg) sess.noProg = true;
+  else { const np = Object.keys(noProgDraft).filter(k=>noProgDraft[k] && entries[k]); if (np.length) sess.noProg = np; }
   if (sessionNote.trim()) sess.note = sessionNote.trim();
   const exN = {};
   for (const k of Object.keys(noteDrafts)) if (noteDrafts[k] && noteDrafts[k].trim() && entries[k]) exN[k]=noteDrafts[k].trim();
@@ -5227,13 +5463,16 @@ try {
     // only restore the selected workout when the draft is from TODAY, so yesterday's
     // pick never overrides today's scheduled workout
     if (d.workoutId && WORKOUTS[d.workoutId]) { workoutId = d.workoutId; draftWorkout = d.workoutId; }
-    values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{};
+    values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{}; noProgDraft = d.noProgDraft||{}; sessNoProg = !!d.sessNoProg;
     if (d.day) draftDay = d.day;
     if (d.wkStart && Date.now()-d.wkStart < DRAFT_TTL){ wkStart = d.wkStart; startWkTick(); }
     draftRestored = true;
   } else if (d) clearDraft();
 } catch(e){}
 applyThemeAttr();
+if (!/^(jcfrith\.github\.io|iron-log-nu\.vercel\.app|iron-log-v2-preview-style-os\.vercel\.app)$/.test(location.hostname)) {
+  try { const b=document.createElement("div"); b.className="devbadge"; b.textContent="DEV"; document.body.appendChild(b); } catch(e){}
+}
 render();
 if (draftRestored) setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400);
 bootBackend();

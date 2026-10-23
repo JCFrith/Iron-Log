@@ -2083,6 +2083,13 @@
   .btitle.long { font-size:clamp(30px,9vw,44px) !important; line-height:.98; }
   .delta { white-space:nowrap; }
   .foodsignin { margin-top:12px; }
+  /* ============ v16.1: keep the save bar pinned on iOS ============ */
+  /* Double-tap zoom on non-button areas left the page slightly zoomed, so the fixed bar drifted.
+     manipulation keeps pinch-zoom (accessibility) and removes double-tap zoom everywhere. */
+  html, body { touch-action:manipulation; }
+  /* JS sets --vv-shift when iOS leaves the layout viewport out of step with what's on screen */
+  .savebar { transform:translate3d(0, var(--vv-shift, 0px), 0); }
+  body.kbd-open .savebar { opacity:0; visibility:hidden; transition:opacity .12s ease, visibility 0s linear .12s; }
 </style>
 </head>
 <body>
@@ -2109,8 +2116,8 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=16.0"></script>
-<script src="records.js?v=16.0"></script>
+<script src="nutrition.js?v=16.1"></script>
+<script src="records.js?v=16.1"></script>
 <script>
 
 "use strict";
@@ -2217,7 +2224,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "16.0";
+const APP_VERSION = "16.1";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -5480,6 +5487,37 @@ try {
     draftRestored = true;
   } else if (d) clearDraft();
 } catch(e){}
+// v16.1: iOS standalone can keep a stale viewport offset after the keyboard closes (or after a zoom),
+// which floats position:fixed bars up the screen until relaunch. Re-pin the save bar to the bottom
+// of what is actually visible, and tuck it away while the keyboard is up.
+(function(){
+  const vv = window.visualViewport; if (!vv) return;
+  let raf = 0, last = null;
+  function editing(){ const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); }
+  function sync(){
+    raf = 0;
+    const kb = editing() && (window.innerHeight - vv.height) > 120;
+    document.body.classList.toggle("kbd-open", kb);
+    let shift = 0;
+    if (!kb && vv.scale <= 1.01){
+      shift = Math.round(vv.offsetTop + vv.height - window.innerHeight);
+      if (Math.abs(shift) < 2 || Math.abs(shift) > 400) shift = 0;
+    }
+    if (shift !== last){ last = shift; document.body.style.setProperty("--vv-shift", shift+"px"); }
+  }
+  function q(){ if (!raf) raf = requestAnimationFrame(sync); }
+  vv.addEventListener("resize", q); vv.addEventListener("scroll", q);
+  addEventListener("scroll", q, {passive:true});
+  addEventListener("orientationchange", ()=>setTimeout(q, 300));
+  addEventListener("pageshow", q);
+  document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) setTimeout(q, 50); });
+  document.addEventListener("focusin", q);
+  document.addEventListener("focusout", ()=>{
+    // nudge iOS into dropping the keyboard offset, then re-measure
+    setTimeout(()=>{ if (!editing()){ window.scrollTo(window.scrollX, window.scrollY); q(); } }, 80);
+  });
+  q();
+})();
 applyThemeAttr();
 if (!/^(jcfrith\.github\.io|iron-log-nu\.vercel\.app|iron-log-v2-preview-style-os\.vercel\.app)$/.test(location.hostname)) {
   try { const b=document.createElement("div"); b.className="devbadge"; b.textContent="DEV"; document.body.appendChild(b); } catch(e){}

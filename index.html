@@ -2131,8 +2131,8 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=16.4"></script>
-<script src="records.js?v=16.4"></script>
+<script src="nutrition.js?v=16.5"></script>
+<script src="records.js?v=16.5"></script>
 <script>
 
 "use strict";
@@ -2251,7 +2251,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "16.4";
+const APP_VERSION = "16.5";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -3232,6 +3232,7 @@ async function afterAuth(){
     if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
   } catch(e){ netState="error"; updateNetBadge(); }
   softRender();
+  setTimeout(autoSaveIfIdle, 500);
 }
 function adoptSession(d){
   const jp = jwtPayload(d.access_token) || {};
@@ -3333,7 +3334,7 @@ function renderTut(){
   h += T("WHOOP", "Connect WHOOP from this menu and your morning recovery, HRV, and sleep appear on the Session tab. Green (67%+): train as planned. Red (under 34%): the app suggests easing off \u2014 your call, or your coach\u2019s.");
   h += T("Coach feedback", "When your coach reviews a session, their note lands at the top of your Session tab and stays pinned to that workout in your history.");
   h += T("Deload weeks", "Every 7th training week the app cuts loads to ~50% automatically. Take it \u2014 that\u2019s when growth consolidates. Or hit Skip and the counter resets.");
-  h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Saved sessions sync to your account, so your history follows you to any device.");
+  h += T("Never lose work", "Everything you type saves to your phone instantly \u2014 close the app mid-workout and it\u2019s waiting when you return. Forget to tap Save and the workout saves itself after an hour with no changes. Saved sessions sync to your account, so your history follows you to any device.");
   h += T("Strength standards", "Your estimated 1RM on the barbell lifts, ranked against population strength standards for your bodyweight \u2014 Beginner through Elite \u2014 with the exact number that gets you to the next level. Machine lifts don\u2019t map to standards, so only barbell movements appear.");
   h += T("Progress tab", "30-day summary vs the previous 30, weekly consistency, muscle-group balance, recent PRs. Tap any lift for its full story: top-set chart, estimated 1RM trend, PR history, every session ever.");
   if (profile && profile.is_coach) h += T("Coach tab", "Your roster: sessions this week vs target, last trained, volume, latest note. Tap an athlete for their session-by-session lift table with progress arrows. Assign programs from the dropdown.");
@@ -3749,11 +3750,15 @@ const DRAFT_TTL = 12*3600*1000;
 // hides — so nothing is lost on background/close. clearDraft cancels any pending write
 // so a queued flush can never resurrect a cleared draft.
 let _draftTimer = null;
+// v16.5 auto-save: lastEditAt = last time anything on the workout changed; savedSid/savedSnap =
+// the session these numbers were last saved as, and what they were at that moment.
+let lastEditAt = 0, savedSid = 0, savedSnap = "";
 function _flushDraft(){
   _draftTimer = null;
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), day:draftDay, workoutId, values, subs, sessionNote, noteDrafts, wkStart, noProgDraft, sessNoProg})); } catch(e){}
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({t:Date.now(), le:lastEditAt, sid:savedSid, snap:savedSnap, day:draftDay, workoutId, values, subs, sessionNote, noteDrafts, wkStart, noProgDraft, sessNoProg})); } catch(e){}
 }
 function saveDraft(){
+  lastEditAt = Date.now();
   if (_draftTimer) clearTimeout(_draftTimer);
   _draftTimer = setTimeout(_flushDraft, 200);
 }
@@ -3769,7 +3774,7 @@ function clearEntered(silent){
   values={}; subs={}; sessionNote=""; noteDrafts={}; noProgDraft={}; sessNoProg=false;
   adjustOpen=null; pickerFor=null; noteOpen=null;
   wkStart=0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
-  stopRest(); clearDraft(); draftDay = dayKey();
+  stopRest(); clearDraft(); draftDay = dayKey(); lastEditAt = 0; savedSid = 0; savedSnap = "";
   if (!silent) toast("Entered numbers cleared.");
   render();
 }
@@ -4997,15 +5002,32 @@ function fillAll(){
   render();
 }
 
-function saveSession(){
-  const w = WORKOUTS[workoutId];
-  // Entered numbers persist after saving, so a second press would duplicate the session.
-  // Confirm instead of blocking \u2014 two real sessions in one day is legitimate.
+// The entries the current screen would save, in exactly the shape saveSession stores them.
+function entriesNow(){
+  const out = {};
+  if (!WORKOUTS[workoutId]) return out;
+  for (const e of effEx(workoutId)){
+    const rows = values[e.id]; if (!rows) continue;
+    const clean = rows.filter(s=>Number(s.r)>0).map(s=>{ const o={w:Number(s.w)||0,r:Number(s.r)||0}; if (s.t) o.t=s.t; if (s.e) o.e=Number(s.e); return o; });
+    if (clean.length) out[e.id] = clean;
+  }
+  return out;
+}
+function saveSession(auto){
+  auto = auto===true;
+  const w = WORKOUTS[workoutId]; if (!w) return;
+  const when = auto && lastEditAt ? new Date(Math.min(Date.now(), lastEditAt)) : new Date();
+  const whenDay = dayKey(when);
   let upd = null;
-  {
-    const dup = sessions.filter(s=>!s.activity && s.workout===workoutId && sameProg(s) && dayKey(new Date(s.date))===dayKey()).pop();
+  // Already saved these numbers (by hand or automatically)? Keep updating that same session.
+  const linked = savedSid ? sessions.find(s=>s.id===savedSid && dayKey(new Date(s.date))===whenDay) : null;
+  if (linked) upd = linked;
+  else {
+    const dup = sessions.filter(s=>!s.activity && s.workout===workoutId && sameProg(s) && dayKey(new Date(s.date))===whenDay).pop();
     if (dup){
-      if (confirm("You already saved "+workoutId+" today.\n\nOK: update that session with these numbers.\nCancel: more options.")) upd = dup;
+      if (auto) upd = dup;      // a workout left open is a continuation, never a second session
+      // Entered numbers persist after saving, so a second press would duplicate the session.
+      else if (confirm("You already saved "+workoutId+" today.\n\nOK: update that session with these numbers.\nCancel: more options.")) upd = dup;
       else if (!confirm("Save these numbers as a second, separate session instead?")) return;
     }
   }
@@ -5035,12 +5057,13 @@ function saveSession(){
       entries[e.id]=clean; logged++;
     }
   }
-  if (!logged){ toast("Nothing to save \u2014 confirm at least one set."); return; }
+  if (!logged){ if (!auto) toast("Nothing to save \u2014 confirm at least one set."); return; }
   const sess = upd ? {id:upd.id, date:upd.date, workout:workoutId, entries, prog:curProg(), rev:(upd.rev||0)+1}
-                   : {id:Date.now(), date:new Date().toISOString(), workout:workoutId, entries, prog:curProg()};
+                   : {id:when.getTime(), date:when.toISOString(), workout:workoutId, entries, prog:curProg()};
   if (upd && upd.mins) sess.mins = upd.mins;
+  if (auto) sess.auto = true;
   if (wkStart){
-    const mins = Math.round((Date.now()-wkStart)/60000);
+    const mins = Math.round((when.getTime()-wkStart)/60000);
     if (mins>=1 && mins<=360) sess.mins = mins;   // sanity: ignore <1 min and >6 h (left running)
   }
   if (isDl) sess.deload = true;
@@ -5050,13 +5073,17 @@ function saveSession(){
   const exN = {};
   for (const k of Object.keys(noteDrafts)) if (noteDrafts[k] && noteDrafts[k].trim() && entries[k]) exN[k]=noteDrafts[k].trim();
   if (Object.keys(exN).length) sess.exNotes = exN;
-  if (upd) sessions[sessions.indexOf(upd)] = sess; else sessions.push(sess);
+  if (upd) sessions[sessions.indexOf(upd)] = sess; else { sessions.push(sess); sessions.sort((a,b)=>a.id-b.id); }
   bumpSessions();
+  savedSid = sess.id; savedSnap = JSON.stringify(entries);
   // Numbers stay on screen after saving \u2014 they clear on day rollover or an explicit clear.
+  const keepEdit = lastEditAt;
   const stored = persist(); adjustOpen=null; pickerFor=null; noteOpen=null; stopRest(); saveDraft();
+  if (auto) lastEditAt = keepEdit;   // saving is not activity
   wkStart = 0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
-  render();
+  if (auto) softRender(); else render();
   pushLog();
+  if (auto){ if (stored) toast("Workout auto-saved \u2014 "+logged+" lifts. Nothing changed for an hour."); return; }
   // celebratory PR moment fires AFTER save completes, never mid-workout
   if (prs.length) showPR(prs);
   else if (stored){ haptic("save"); toast((upd?"Updated":"Saved")+" \u2014 "+logged+" lifts logged."); }
@@ -5731,13 +5758,22 @@ try {
   const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
   if (d && d.values && hasEntered(d.values) && Date.now()-(Number(d.t)||0) >= DRAFT_TTL){
     const day = d.day || dayKey(new Date(Number(d.t)||Date.now()));
+    if (d.le) d.t = d.le;
     const sess = draftToSession(d);
+    const linked = sess && d.sid ? sessions.find(x=>x.id===Number(d.sid)) : null;
+    if (linked){
+      let changed = false;
+      for (const k of Object.keys(sess.entries)){ if (JSON.stringify(linked.entries[k]||null)!==JSON.stringify(sess.entries[k])){ linked.entries[k] = sess.entries[k]; changed = true; } }
+      if (changed){ linked.rev = (linked.rev||0)+1; bumpSessions(); persist(); setDirty(true); draftRecovered = linked; }
+      clearDraft();
+    } else {
     const already = sess && sessions.some(x=>!x.activity && dayKey(new Date(x.date))===day && Object.keys(sess.entries).some(k=>x.entries && x.entries[k] && x.entries[k].length));
     if (sess && !already && !sessions.some(x=>x.id===sess.id)){
       sessions.push(sess); sessions.sort((a,b)=>a.id-b.id); bumpSessions();
       persist(); setDirty(true); draftRecovered = sess;
     }
     clearDraft();
+    }
   }
 } catch(e){}
 try {
@@ -5752,6 +5788,7 @@ try {
     if (d.workoutId && WORKOUTS[d.workoutId]) { workoutId = d.workoutId; draftWorkout = d.workoutId; }
     values = d.values; subs = d.subs||{}; sessionNote = d.sessionNote||""; noteDrafts = d.noteDrafts||{}; noProgDraft = d.noProgDraft||{}; sessNoProg = !!d.sessNoProg;
     if (d.day) draftDay = d.day;
+    lastEditAt = Number(d.le) || Number(d.t) || 0; savedSid = Number(d.sid) || 0; savedSnap = typeof d.snap==="string" ? d.snap : "";
     if (d.wkStart && Date.now()-d.wkStart < DRAFT_TTL){ wkStart = d.wkStart; startWkTick(); }
     draftRestored = true;
   } else if (d) clearDraft();
@@ -5793,6 +5830,22 @@ if (!/^(jcfrith\.github\.io|iron-log-nu\.vercel\.app|iron-log-v2-preview-style-o
 }
 render();
 if (draftRestored) setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400);
+// v16.5: a workout with unsaved numbers saves itself after an hour with no changes. Checked every
+// minute while the app is open, when it comes back to the foreground, and once the program loads.
+const IDLE_SAVE_MS = 60*60*1000;
+function autoSaveIfIdle(){
+  try {
+    if (!WORKOUTS || !WORKOUTS[workoutId]) return;
+    if (auth && (!profile || netState==="syncing")) return;      // wait for the real program
+    if (!lastEditAt || Date.now()-lastEditAt < IDLE_SAVE_MS) return;
+    const snap = JSON.stringify(entriesNow());
+    if (snap==="{}" || snap===savedSnap) return;
+    saveSession(true);
+  } catch(e){}
+}
+setInterval(autoSaveIfIdle, 60000);
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) setTimeout(autoSaveIfIdle, 2500); });
+setTimeout(autoSaveIfIdle, 3000);
 if (draftRecovered) setTimeout(()=>toast("Found an unsaved workout from "+new Date(draftRecovered.date).toLocaleString(undefined,{weekday:"short",hour:"numeric",minute:"2-digit"})+" and saved it to your history."), 600);
 bootBackend();
 

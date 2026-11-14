@@ -336,6 +336,7 @@ async function nRecSave(){
   }
 }
 async function nRecView(path){
+  if (typeof path!=="string" || !/^[A-Za-z0-9._\/ -]{1,300}$/.test(path) || path.indexOf("..")>=0) return;
   const w = window.open("", "_blank");
   try {
     if (auth && auth.exp - 60 < Math.floor(Date.now()/1000)) await refreshAuth();
@@ -350,9 +351,17 @@ async function nRecDelete(id){
   const R = nut.rec, rec = R.records.find(x=>x.id===id); if (!rec) return;
   if (!confirm("Delete this "+(REC_KINDS[rec.kind]||"record")+" from "+nDate(rec.record_date)+"? This removes the file"+(rec.kind==="labs"?" and its results":" and its numbers")+".")) return;
   try {
+    // File first: if the row went first and the file delete failed, the file would be left behind with nothing pointing at it.
+    if (rec.file_path){
+      const f = await fetch(SUPA+"/storage/v1/object/"+REC_BUCKET+"/"+rec.file_path, { method:"DELETE", headers:{ apikey:SUPA_KEY, Authorization:"Bearer "+auth.at } });
+      if (!f.ok && f.status!==404 && f.status!==400) throw new Error("file");
+    }
     const r = await sb("/rest/v1/health_records?id=eq."+id, { method:"DELETE" }); if (!r.ok) throw new Error();
-    if (rec.body_comp_id){ await sb("/rest/v1/body_comp?id=eq."+rec.body_comp_id, { method:"DELETE" }); const W = nWho(); const i = W.bc.findIndex(x=>x.id===rec.body_comp_id); if (i>=0) W.bc.splice(i,1); }
-    if (rec.file_path) await fetch(SUPA+"/storage/v1/object/"+REC_BUCKET+"/"+rec.file_path, { method:"DELETE", headers:{ apikey:SUPA_KEY, Authorization:"Bearer "+auth.at } });
+    if (rec.body_comp_id){
+      const d = await sb("/rest/v1/body_comp?id=eq."+rec.body_comp_id, { method:"DELETE" });
+      if (d.ok){ const W = nWho(); const i = W.bc.findIndex(x=>x.id===rec.body_comp_id); if (i>=0) W.bc.splice(i,1); }
+      else toast("Record deleted, but its body-composition entry could not be removed. Delete it from the Food tab.");
+    }
     R.records = R.records.filter(x=>x.id!==id); R.labs = R.labs.filter(x=>x.record_id!==id);
     render(); toast("Deleted.");
   } catch(e){ toast("Couldn’t delete."); }
@@ -425,7 +434,7 @@ function renderRecords(){
     if (s.lean_mass_lb) parts.push(r1(s.lean_mass_lb)+" lean");
     if (s.rmr_kcal) parts.push(s.rmr_kcal+" kcal RMR");
     h += '<div class="trow"><span class="d">'+nDate(s.measured_on)+' · '+({dexa:"DEXA",pnoe:"PNOE",estimate:"Body fat est."}[s.method])+'</span><span class="s num">'+esc(parts.join(" · "))
-      + (rec && rec.file_path ? ' <button class="silink" style="margin-left:6px" onclick="nRecView(\''+esc(rec.file_path)+'\')">File</button>' : '')
+      + (rec && rec.file_path ? ' <button class="silink" style="margin-left:6px" data-p="'+esc(rec.file_path)+'" onclick="nRecView(this.dataset.p)">File</button>' : '')
       + ' <button class="delbtn sm" onclick="'+(rec ? 'nRecDelete(\''+rec.id+'\')' : 'nBcDelete(\''+s.id+'\')')+'" aria-label="Delete">✕</button></span></div>';
   });
   h += '<div class="nbtnrow"><button class="silink" onclick="nut.bcForm={method:\'estimate\',date:dayKey(),wt:\'\',lean:\'\',bf:\'\',rmr:\'\'};render()">Add a body fat % estimate (no scan)</button></div>';
@@ -439,7 +448,7 @@ function renderRecords(){
   labRecs.forEach(r=>{
     const n = R.labs.filter(x=>x.record_id===r.id).length, fl = R.labs.filter(x=>x.record_id===r.id && x.flag).length;
     h += '<div class="trow"><span class="d">'+nDate(r.record_date)+' · '+esc(r.title||"Labs")+'</span><span class="s num">'+n+' result'+(n===1?'':'s')+(fl?' · <span style="color:var(--warn)">'+fl+' flagged</span>':'')
-      + (r.file_path ? ' <button class="silink" style="margin-left:6px" onclick="nRecView(\''+esc(r.file_path)+'\')">File</button>' : '')
+      + (r.file_path ? ' <button class="silink" style="margin-left:6px" data-p="'+esc(r.file_path)+'" onclick="nRecView(this.dataset.p)">File</button>' : '')
       + ' <button class="delbtn sm" onclick="nRecDelete(\''+r.id+'\')" aria-label="Delete">✕</button></span></div>';
   });
   h += '</div>';

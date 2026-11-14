@@ -2090,6 +2090,21 @@
   /* JS sets --vv-shift when iOS leaves the layout viewport out of step with what's on screen */
   .savebar { transform:translate3d(0, var(--vv-shift, 0px), 0); }
   body.kbd-open .savebar { opacity:0; visibility:hidden; transition:opacity .12s ease, visibility 0s linear .12s; }
+
+  /* ===== v16.2: contrast, header, sign-in row ===== */
+  .tabs button:not(.on) { color:#aca7a1; }
+  .brandsub, .wtag, .weekbadge, .bm .l, .day .dow, .exidx, .coachlbl, .tally, .kpi .l, .tile .l { color:#aca7a1; }
+  .day.sel .dow { color:var(--accent-hi); }
+  .exc.full .exidx { color:#0c1f12; }
+  .brand { white-space:nowrap; text-wrap:nowrap; font-size:clamp(24px,7vw,42px); }
+  .brand .brandsub { white-space:nowrap; letter-spacing:.12em; }
+  @media (max-width:400px){ .brand .brandsub { letter-spacing:.06em; } }
+  .signin.sibar { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:56px;
+    padding:12px 18px; text-align:left; font:inherit; color:var(--text); cursor:pointer; }
+  .signin.sibar b { display:block; font-size:15px; }
+  .sibarsub { display:block; margin-top:2px; color:#aca7a1; font-size:12.5px; }
+  .sibargo { font-size:22px; color:var(--accent-hi); }
+  :focus-visible { outline:2px solid var(--accent-hi, #ff8a3d); outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -2116,8 +2131,8 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=16.1"></script>
-<script src="records.js?v=16.1"></script>
+<script src="nutrition.js?v=16.2"></script>
+<script src="records.js?v=16.2"></script>
 <script>
 
 "use strict";
@@ -2165,21 +2180,33 @@ function applyProgram(p){
     return;
   }
   const built = {};
+  // v16.2: program JSON is coach-written data. Coerce every number and restrict workout keys,
+  // so nothing in it can reach an inline handler or break the planner's arithmetic.
+  const num = (v, d, lo, hi)=>{ const n = Number(v); return isFinite(n) && n>=lo && n<=hi ? n : d; };
   for (const [k,w] of Object.entries(p.workouts)){
-    built[k] = { label:w.label||("Workout "+k), tag:w.tag||"", exercises:(w.exercises||[]).map(e=>({
-      id:slug(e.name), name:e.name, min:e.min, max:e.max, sets:e.sets||2, cat:e.cat||null,
-      note:e.note||"", bw:!!e.bw, unit:e.unit||"reps", rest:e.rest||0,
-      prog:PROGS.includes(e.prog) ? e.prog : "", rpeCap:Number(e.rpeCap)||0,
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,23}$/.test(k) || !w || typeof w!=="object") continue;
+    built[k] = { label:String(w.label||("Workout "+k)), tag:String(w.tag||""), exercises:(Array.isArray(w.exercises)?w.exercises:[]).filter(e=>e && slug(String(e.name||""))).map(e=>{
+      const mn = num(e.min, 8, 1, 3600), mx = Math.max(mn, num(e.max, mn, 1, 3600));
+      return {
+      id:slug(String(e.name)), name:String(e.name), min:mn, max:mx, sets:Math.round(num(e.sets, 2, 1, 12)), cat:e.cat?String(e.cat):null,
+      note:String(e.note||""), bw:!!e.bw, unit:e.unit==="sec"?"sec":"reps", rest:num(e.rest, 0, 0, 3600), inc:num(e.inc, 0, 0, 100),
+      prog:PROGS.includes(e.prog) ? e.prog : "", rpeCap:num(e.rpeCap, 0, 0, 10),
       alts:Array.isArray(e.alts) ? e.alts.map(x=>String(x||"").trim()).filter(Boolean) : []
-    })) };
+    }; }) };
     built[k].exercises.forEach(e=>{ if (!LIBNAME[e.id]) LIBNAME[e.id]=e.name; });
   }
+  if (!Object.keys(built).length){ applyProgram(null); return; }
   WORKOUTS = built;
   SCHEDULE = {};
-  for (let d=0; d<7; d++){ const v = (p.schedule||{})[String(d)] ?? (p.schedule||{})[d] ?? null; SCHEDULE[d] = v; }
-  INC = p.inc || 5;
-  WEEK_TARGET = p.weekTarget || 5;
-  DELOAD_EVERY = (p.deloadEvery===0) ? 0 : (p.deloadEvery || 7);
+  for (let d=0; d<7; d++){
+    let v = (p.schedule||{})[String(d)] ?? null;
+    if (Array.isArray(v)){ v = v.filter(x=>typeof x==="string" && built[x]); if (!v.length) v = null; }
+    else if (!(typeof v==="string" && built[v])) v = null;
+    SCHEDULE[d] = v;
+  }
+  INC = num(p.inc, 5, 0.5, 100);
+  WEEK_TARGET = Math.round(num(p.weekTarget, 5, 1, 14));
+  DELOAD_EVERY = (Number(p.deloadEvery)===0) ? 0 : Math.round(num(p.deloadEvery, 7, 2, 52));
   PROG_REST = Number(p.rest) || 0;
   WEEKLY_PROG = !!p.weeklyProgression;
   PROG_DEFAULT = PROGS.includes(p.prog) ? p.prog : "";
@@ -2224,7 +2251,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "16.1";
+const APP_VERSION = "16.2";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2258,17 +2285,30 @@ function saveAuth(){
 function parseAuthHash(){
   if (!/access_token=/.test(location.hash)) return false;
   const p = {};
-  location.hash.replace(/^#/,"").split("&").forEach(kv=>{ const [k,v]=kv.split("="); p[k]=decodeURIComponent(v||""); });
+  try { location.hash.replace(/^#/,"").split("&").forEach(kv=>{ const [k,v]=kv.split("="); p[k]=decodeURIComponent(v||""); }); }
+  catch(e){ try { history.replaceState(null,"",location.pathname+location.search); } catch(e2){} return false; }
+  try { history.replaceState(null,"",location.pathname+location.search); } catch(e){}
   if (!p.access_token || !p.refresh_token) return false;
   const jp = jwtPayload(p.access_token) || {};
+  if (!jp.sub) return false;
+  // a link must never silently replace a different signed-in account
+  if (auth && auth.uid && auth.uid!==jp.sub){
+    if (!confirm("This link signs you in as "+(jp.email||"another account")+". You are signed in as "+(auth.email||"someone else")+". Switch accounts?")) return false;
+  }
   const expAbs = Number(p.expires_at) || (jp.exp) || (Math.floor(Date.now()/1000)+(Number(p.expires_in)||3600));
   auth = { at:p.access_token, rt:p.refresh_token, exp: expAbs, uid: jp.sub, email: jp.email||"" };
+  authViaLink = true;
   saveAuth();
-  if (expAbs < Math.floor(Date.now()/1000)) setTimeout(()=>toast("That sign-in link already expired \u2014 send yourself a fresh one."), 500);
-  try { history.replaceState(null,"",location.pathname+location.search); } catch(e){}
+  if (expAbs < Math.floor(Date.now()/1000)) setTimeout(()=>toast("That sign-in link already expired — send yourself a fresh one."), 500);
   return true;
 }
-async function refreshAuth(){
+let _refreshing = null;
+function refreshAuth(){
+  if (_refreshing) return _refreshing;
+  _refreshing = _refreshAuthRaw().finally(()=>{ _refreshing = null; });
+  return _refreshing;
+}
+async function _refreshAuthRaw(){
   if (!auth || !auth.rt) return false;
   try {
     const r = await fetch(SUPA+"/auth/v1/token?grant_type=refresh_token", {
@@ -2325,6 +2365,7 @@ async function signIn(){
 async function signOut(){
   try { await sb("/auth/v1/logout", {method:"POST"}); } catch(e){}
   auth=null; profile=null; programName=""; netState="local";
+  try { if (typeof nReset==="function") nReset(); } catch(e){}
   localOnly=false; try{ localStorage.removeItem("iron-log-local-ok"); localStorage.removeItem(BOOT_CACHE); }catch(e){}
   saveAuth();
   applyProgram(null);
@@ -2376,51 +2417,156 @@ async function loadProgram(){
   } else applyProgram(null);
 }
 
+// v16.2: coerce everything numeric in session data. Logs are user-writable, and the coach view
+// renders other people's logs, so nothing from a log may reach markup as a raw string.
+function cleanSessions(arr){
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const x of arr){
+    if (!x || typeof x!=="object") continue;
+    x.id = Number(x.id); if (!isFinite(x.id)) continue;
+    if (typeof x.date!=="string" || isNaN(Date.parse(x.date))) continue;
+    x.workout = String(x.workout==null?"":x.workout).slice(0,40);
+    if (x.rev!=null) x.rev = Number(x.rev)||0;
+    if (x.activity && typeof x.activity==="object"){ x.activity.name = String(x.activity.name||"Activity").slice(0,80); x.activity.mins = Number(x.activity.mins)||0; }
+    else if (x.activity) delete x.activity;
+    const en = {};
+    if (x.entries && typeof x.entries==="object"){
+      for (const k of Object.keys(x.entries)){
+        const sets = x.entries[k]; if (!Array.isArray(sets)) continue;
+        const key = /^[a-z0-9-]{1,80}$/.test(k) ? k : slug(String(k)).slice(0,80);
+        if (!key) continue;
+        en[key] = sets.filter(z=>z && typeof z==="object").map(z=>{
+          const o = { w:Number(z.w)||0, r:Number(z.r)||0 };
+          if (z.e!=null && z.e!=="") { const e=Number(z.e); if (e>0 && e<=10) o.e=e; }
+          if (z.t==="w" || z.t==="d") o.t=z.t;
+          return o;
+        });
+      }
+    }
+    x.entries = en;
+    out.push(x);
+  }
+  return out;
+}
+function cleanMetrics(arr){
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(m=>m && typeof m==="object" && isFinite(Number(m.id))).map(m=>{ m.id=Number(m.id); m.w=Number(m.w)||0; if (m.waist!=null) m.waist=Number(m.waist)||0; return m; });
+}
 // ---------- log sync ----------
-async function pullMergePush(){
-  const r = await sb("/rest/v1/logs?select=data&user_id=eq."+auth.uid);
+const DIRTY_KEY = "iron-log-dirty";
+function isDirty(){ try { return localStorage.getItem(DIRTY_KEY)==="1"; } catch(e){ return false; } }
+function setDirty(v){ try { v ? localStorage.setItem(DIRTY_KEY,"1") : localStorage.removeItem(DIRTY_KEY); } catch(e){} }
+// A local log belongs to whoever last synced it. If a different account signs in on this device,
+// set the old log aside instead of merging it into the new account.
+function scopeLocalLogTo(uid){
+  if (logOwner && logOwner!==uid){
+    try { localStorage.setItem("iron-log-stash-"+logOwner, JSON.stringify({sessions, deloadSkips, stallMutes, metrics, deleted:deletedIds, deletedMetrics:deletedMetricIds})); } catch(e){}
+    sessions=[]; metrics=[]; deloadSkips=[]; deletedIds=[]; deletedMetricIds=[]; stallMutes=[];
+    try { clearEntered(true); } catch(e){}
+    bumpSessions();
+  } else if (!logOwner && authViaLink && (sessions.length || metrics.length)){
+    // signed in from a link, with un-owned history on this device: ask before uploading it
+    if (!confirm("This device has "+sessions.length+" workouts saved without an account. Add them to "+(auth.email||"this account")+"?")){
+      try { localStorage.setItem("iron-log-stash-local", JSON.stringify({sessions, deloadSkips, metrics})); } catch(e){}
+      sessions=[]; metrics=[]; deloadSkips=[]; bumpSessions();
+    }
+  }
+  // bring back anything this account left unsynced on this device earlier
+  try {
+    const raw = localStorage.getItem("iron-log-stash-"+uid);
+    if (raw){
+      const st = JSON.parse(raw); const ids = new Set(sessions.map(x=>x.id));
+      cleanSessions(st.sessions).forEach(x=>{ if (!ids.has(x.id)) sessions.push(x); });
+      const mids = new Set(metrics.map(m=>m.id));
+      cleanMetrics(st.metrics).forEach(m=>{ if (!mids.has(m.id)) metrics.push(m); });
+      localStorage.removeItem("iron-log-stash-"+uid); bumpSessions();
+    }
+  } catch(e){}
+  authViaLink = false;
+  if (logOwner!==uid){ logOwner = uid; persist(); }
+}
+async function pullMerge(){
+  const uid = auth.uid;
+  const r = await sb("/rest/v1/logs?select=data&user_id=eq."+uid);
   if (!r.ok) throw 0;
+  if (!auth || auth.uid!==uid) throw 0;
   const rows = await r.json();
+  scopeLocalLogTo(uid);
   const cloudData = rows.length && rows[0].data ? rows[0].data : {};
-  const cloud = Array.isArray(cloudData.sessions) ? cloudData.sessions : [];
-  (Array.isArray(cloudData.deloadSkips)?cloudData.deloadSkips:[]).forEach(k=>{ if(!deloadSkips.includes(k)) deloadSkips.push(k); });
-  (Array.isArray(cloudData.deleted)?cloudData.deleted:[]).forEach(id=>{ if(!deletedIds.includes(id)) deletedIds.push(id); });
-  (Array.isArray(cloudData.deletedMetrics)?cloudData.deletedMetrics:[]).forEach(id=>{ if(!deletedMetricIds.includes(id)) deletedMetricIds.push(id); });
+  const cloud = cleanSessions(cloudData.sessions);
+  (Array.isArray(cloudData.deloadSkips)?cloudData.deloadSkips:[]).forEach(k=>{ if(typeof k==="string" && !deloadSkips.includes(k)) deloadSkips.push(k); });
+  (Array.isArray(cloudData.deleted)?cloudData.deleted:[]).forEach(id=>{ id=Number(id); if(isFinite(id) && !deletedIds.includes(id)) deletedIds.push(id); });
+  (Array.isArray(cloudData.deletedMetrics)?cloudData.deletedMetrics:[]).forEach(id=>{ id=Number(id); if(isFinite(id) && !deletedMetricIds.includes(id)) deletedMetricIds.push(id); });
+  const before = sessions.length;
   sessions = sessions.filter(s=>!deletedIds.includes(s.id)); bumpSessions();
   const byId = new Map(sessions.map(s=>[s.id,s]));
-  let added=0;
+  let added = before - sessions.length ? 1 : 0, localNewer = 0;
   cloud.forEach(s=>{
     if (deletedIds.includes(s.id)) return;
     const mine = byId.get(s.id);
     if (!mine){ sessions.push(s); byId.set(s.id,s); added++; bumpSessions(); }
-    else if ((s.rev||0) > (mine.rev||0)){ Object.assign(mine, s); added++; }
+    else if ((s.rev||0) > (mine.rev||0)){ Object.assign(mine, s); added++; bumpSessions(); }
+    else if ((s.rev||0) < (mine.rev||0)) localNewer++;
   });
   sessions.sort((a,b)=>a.id-b.id);
-  // metrics: union by id, tombstone-aware
-  const cm = Array.isArray(cloudData.metrics)?cloudData.metrics:[];
+  const cm = cleanMetrics(cloudData.metrics);
   metrics = metrics.filter(m=>!deletedMetricIds.includes(m.id));
   const mids = new Set(metrics.map(m=>m.id));
   cm.forEach(m=>{ if(!deletedMetricIds.includes(m.id) && !mids.has(m.id)){ metrics.push(m); added++; } });
   metrics.sort((a,b)=>a.id-b.id);
   const migrated = migrateIds();
   if (added || migrated) persist();
-  if (sessions.length !== cloud.length || added || migrated) await pushLog();
-  return added;
+  const needPush = sessions.length !== cloud.length || metrics.length !== cm.length || localNewer>0 || migrated || isDirty();
+  return { added, needPush };
 }
-async function pushLog(){
+async function pullMergePush(){
+  const m = await pullMerge();
+  if (m.needPush) await pushLog(true);
+  return m.added;
+}
+async function pushLog(skipPull){
   if (!auth) return;
   try {
+    // merge what other devices saved first, so this upload never overwrites their sessions
+    if (!skipPull) await pullMerge();
     const r = await sb("/rest/v1/logs", { method:"POST",
       headers:{ "Prefer":"resolution=merge-duplicates" },
       body:[{ user_id:auth.uid, data:{sessions, deloadSkips, metrics, deleted:deletedIds.slice(-300), deletedMetrics:deletedMetricIds.slice(-300)}, updated_at:new Date().toISOString() }] });
     if (!r.ok) throw 0;
-    netState="live";
+    netState="live"; setDirty(false);
   } catch(e){
-    netState="error";
-    toast("Cloud save failed \u2014 kept locally, will retry on next save.");
+    netState="error"; setDirty(true);
+    toast("Cloud save failed — kept on this device. It will retry automatically.");
   }
   updateNetBadge();
 }
+// Re-sync when the app comes back to the foreground or the connection returns.
+let _syncAt = 0, _syncing = false;
+async function syncNow(force){
+  if (!auth || _syncing) return;
+  if (!force && !isDirty() && Date.now()-_syncAt < 60000) return;
+  _syncing = true; _syncAt = Date.now();
+  try {
+    const added = await pullMergePush();
+    netState="live"; updateNetBadge();
+    if (added) softRender();
+  } catch(e){} finally { _syncing = false; }
+}
+// Render from a background event without wiping a field someone is typing in.
+let _softPending = false;
+function softRender(){
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)){
+    if (_softPending) return; _softPending = true;
+    const go = ()=>{ a.removeEventListener("blur", go); setTimeout(()=>{ _softPending=false; softRender(); }, 60); };
+    a.addEventListener("blur", go);
+    return;
+  }
+  render();
+}
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) syncNow(false); });
+addEventListener("online", ()=>syncNow(true));
 function updateNetBadge(){
   const el = document.getElementById("netdot");
   if (el) el.className = "netdot "+netState;
@@ -2714,7 +2860,7 @@ async function whoopSync(silent){
       headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
       body: JSON.stringify({action:"sync"}) });
     const j = await r.json();
-    if (j.synced){ await loadWhoop(); render(); }
+    if (j.synced){ await loadWhoop(); softRender(); }
     else if (!silent && j.reconnect) toast("WHOOP link expired \u2014 reconnect from the menu.");
   } catch(e){ if (!silent) toast("WHOOP sync failed."); }
 }
@@ -2787,7 +2933,7 @@ async function saveCoachNote(athleteUid, sessId){
     coachNoteDrafts[sessId]="";
     if (coachData){ const a=coachData.athletes.find(x=>x.uid===athleteUid); if (a){ a.notes=a.notes||[]; const ex=a.notes.find(n=>n.session_id===sessId); if(ex) ex.body=body; else a.notes.unshift({session_id:sessId, body, created_at:new Date().toISOString()}); } }
     render();
-  } catch(e){ toast("Couldn\u2019t send \u2014 run the coach_notes migration?"); }
+  } catch(e){ toast("Couldn\u2019t send the note \u2014 check your connection and try again."); }
 }
 let coachView = null; // {uid, sessId}
 // ---------- program builder ----------
@@ -3015,7 +3161,7 @@ async function loadCoach(){
   const logMap = {}; logs.forEach(l=>{ logMap[l.user_id]=l; });
   coachData = { athletes: profs.map(p=>{
       const l = logMap[p.user_id];
-      const ss = l && l.data && Array.isArray(l.data.sessions) ? l.data.sessions : [];
+      const ss = cleanSessions(l && l.data ? l.data.sessions : []);
       const wk = weekKey(new Date().toISOString());
       let wkN=0, wkVol=0, last=null;
       ss.forEach(s=>{
@@ -3062,7 +3208,7 @@ async function afterAuth(){
     ]);
     if (tagLegacySessions()) pushLog();
     saveBootCache();
-    render();  // fresh server program may correct the workout the stale boot-cache painted
+    softRender();  // fresh server program may correct the workout the stale boot-cache painted
     if (whoopRec && Date.now()-new Date(whoopRec.updated_at).getTime() > 3*3600000) whoopSync(true);
     try {
       const q = new URLSearchParams(location.search);
@@ -3073,7 +3219,7 @@ async function afterAuth(){
     if (profile && profile.is_coach){ const b=document.getElementById("tab-coach"); if (b) b.style.display=""; }
     if (added) toast("Synced \u2014 "+added+" sessions pulled from your account.");
   } catch(e){ netState="error"; updateNetBadge(); }
-  render();
+  softRender();
 }
 function adoptSession(d){
   const jp = jwtPayload(d.access_token) || {};
@@ -3105,7 +3251,7 @@ async function signUpPw(){
       return;
     }
     if (d.access_token){ adoptSession(d); toast("Account created \u2014 you\u2019re in."); await afterAuth(); }
-    else toast("Account created \u2014 check your email to confirm, then sign in. (Tip: turn off email confirmation in Supabase to skip this.)");
+    else toast("Account created \u2014 check your email to confirm, then sign in.");
   } catch(e){ toast("Couldn\u2019t reach the sign-in server."); }
 }
 async function signInPw(){
@@ -3160,7 +3306,7 @@ function renderTut(){
   h += '<div class="sheethead"><span class="sheettitle disp">How Iron Log works</span><span class="sheetsub">The 60-second tour</span></div>';
   h += T("Coach targets", "Every lift card tells you what to do today. <b>Beat last</b>: same weight, one more rep. Hit the top of the rep range on every set and it flips to <b>\u25B2 Add weight</b>. First time on a lift? Set a comfortable baseline \u2014 the system takes it from there.");
   h += T("Workout timer", "Tap <b>Begin workout</b> when you start (or just log your first set \u2014 the clock starts itself). Saving stamps the duration, and once a workout has a couple of timed sessions the app tells you how long it usually takes, so you know what gym window to book.");
-  h += T("Logging", "Tap <b>Fill session to plan</b> to load suggested weights for the whole workout (or Prefill per lift), then enter reps as you finish each set. A set only saves once it has reps \u2014 a weight of 0 is fine for bodyweight work. + Add set for extras; \u2715 removes them.");
+  h += T("Logging", "Tap <b>Fill session to plan</b> to load suggested weights for the whole workout (or Prefill per lift), then enter reps as you finish each set. A set saves once it has reps \u2014 leave the weight blank for bodyweight work. + Add set for extras; \u2715 removes them.");
   h += T("Swap a lift", "Tap a lift\u2019s name to pick an alternative for that body part. The sub inherits today\u2019s sets and reps, builds its own history, and the prescribed lift returns next session.");
   h += T("Rest timer", "Starts automatically when you enter reps. Tap the chip to skip.");
   h += T("Notes", "\u270E on a lift for lift notes (\u201Cknee tweaked set 2\u201D); the box above Save for session notes. Your coach sees both.");
@@ -3321,6 +3467,7 @@ function renderMenu(){
 let signinSent = null;
 let authMode = "signin";
 let pathSex = null;
+let siOpen = false;        // signed-out card stays a single row until tapped
 let localOnly = false;
 try { localOnly = localStorage.getItem("iron-log-local-ok")==="1"; } catch(e){}
 function skipSignIn(){
@@ -3413,8 +3560,9 @@ let stallMutes = [];
 const PROGS = ["double","linear","time","off"];
 function policyOf(e){
   if (e && PROGS.includes(e.prog)) return e.prog;
+  if (e && e.unit==="sec") return PROG_DEFAULT==="off" ? "off" : "time";
   if (PROG_DEFAULT) return PROG_DEFAULT;
-  return (e && e.unit==="sec") ? "time" : "double";
+  return "double";
 }
 const TIME_STEP = 5;
 // ---- v16: effort scale (stored as RPE on every set; RIR = 10 - RPE) ----
@@ -3492,8 +3640,12 @@ function cycleRpe(exId, i){
 let metrics = [];        // [{id, date, w, waist?, note?}]
 let deletedIds = [];     // session tombstones
 let deletedMetricIds = [];
+let logOwner = null;      // uid whose account this device's log belongs to (null = never synced)
+let authViaLink = false;  // session came from a link in the URL, not typed credentials
 try { const raw = localStorage.getItem(KEY); if (raw) { const p = JSON.parse(raw); if (Array.isArray(p.sessions)) sessions = p.sessions; if (Array.isArray(p.deloadSkips)) deloadSkips = p.deloadSkips; if (Array.isArray(p.stallMutes)) stallMutes = p.stallMutes; if (Array.isArray(p.metrics)) metrics = p.metrics; if (Array.isArray(p.deleted)) deletedIds = p.deleted; if (Array.isArray(p.deletedMetrics)) deletedMetricIds = p.deletedMetrics; } } catch(e){}
-if (migrateIds()) { try { localStorage.setItem(KEY, JSON.stringify({sessions, deloadSkips})); } catch(e){} }
+try { const p0 = JSON.parse(localStorage.getItem(KEY)||"{}"); if (p0 && typeof p0.owner==="string") logOwner = p0.owner; } catch(e){}
+sessions = cleanSessions(sessions); metrics = cleanMetrics(metrics);
+if (migrateIds()) { try { persist(); } catch(e){} }
 let tab = "train";
 let values = {};
 let progressEx = "leg-press";
@@ -3615,11 +3767,19 @@ function clearEnteredConfirm(){
   menuOpen=false; clearEntered();
 }
 // If the app sits open past midnight, entered numbers belong to yesterday \u2014 drop them.
+function draftIsSaved(day, wid){
+  return sessions.some(s=>!s.activity && s.workout===wid && dayKey(new Date(s.date))===day);
+}
+function hasEntered(v){ return Object.keys(v||{}).some(k=>(v[k]||[]).some(r=>r && (r.w!=="" || r.r!==""))); }
 function maybeRollover(){
   const t = dayKey();
   if (draftDay === t) return false;
-  draftDay = t;
-  if (Object.keys(values).length){ clearEntered(true); return true; }
+  const was = draftDay; draftDay = t;
+  if (hasEntered(values)){
+    // a workout still in progress past midnight is unsaved work: keep it
+    if (!draftIsSaved(was, workoutId)){ saveDraft(); return false; }
+    clearEntered(true); return true;
+  }
   clearDraft(); return false;
 }
 function setNoteDraft(exId, v){ noteDrafts[exId]=v; saveDraft(); }
@@ -3643,12 +3803,12 @@ function effEx(wid){
   return WORKOUTS[wid].exercises.map(p=>{
     const nm = subs[wid+":"+p.id];
     if (!nm || slug(nm)===p.id) return p;
-    return {id:slug(nm), name:nm, min:p.min, max:p.max, sets:p.sets, cat:p.cat, alts:p.alts||[], prog:p.prog||"", rpeCap:p.rpeCap||0, unit:p.unit, subOf:p};
+    return {id:slug(nm), name:nm, min:p.min, max:p.max, sets:p.sets, cat:p.cat, alts:p.alts||[], prog:p.prog||"", rpeCap:p.rpeCap||0, inc:p.inc||0, rest:p.rest||0, unit:p.unit, subOf:p};
   });
 }
 let lastTabRendered = null;
 let _planCache = Object.create(null), _planStamp = null;   // §1 per-workout plan/stall cache
-function persist(){ try { localStorage.setItem(KEY, JSON.stringify({sessions, deloadSkips, stallMutes, metrics, deleted:deletedIds.slice(-300), deletedMetrics:deletedMetricIds.slice(-300)})); } catch(e){ toast("Storage failed \u2014 device may be full."); } }
+function persist(){ try { localStorage.setItem(KEY, JSON.stringify({owner:logOwner, sessions, deloadSkips, stallMutes, metrics, deleted:deletedIds.slice(-300), deletedMetrics:deletedMetricIds.slice(-300)})); return true; } catch(e){ toast("Couldn\u2019t save on this device \u2014 storage may be full. Export a backup from the System panel."); return false; } }
 
 // ================= Schedule =================
 function altPick(list, dow){
@@ -3682,7 +3842,7 @@ let _wkCache = Object.create(null), _wkCacheN = 0;
 function weekKey(iso){
   const hit = _wkCache[iso]; if (hit) return hit;
   const d=new Date(iso); const day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(0,0,0,0);
-  const k=d.toISOString().slice(0,10);
+  const k=dayKey(d);
   if (_wkCacheN > 4000){ _wkCache = Object.create(null); _wkCacheN = 0; }  // cap: now()-ISO strings are unique
   _wkCache[iso]=k; _wkCacheN++;
   return k;
@@ -3690,7 +3850,7 @@ function weekKey(iso){
 function lastEntryFor(exId, includeExcluded){
   for (let i=sessions.length-1;i>=0;i--){
     if (!sameProg(sessions[i])) continue;
-    if (!includeExcluded && progExcluded(sessions[i], exId)) continue;
+    if (!includeExcluded && (sessions[i].deload || progExcluded(sessions[i], exId))) continue;
     const sets = workSets(sessions[i].entries && sessions[i].entries[exId]);
     if (sets && sets.some(s=>s.r>0)) return {sets:sets.filter(s=>s.r>0), date:sessions[i].date};
   }
@@ -3700,7 +3860,7 @@ function lastEntryFor(exId, includeExcluded){
 function entriesByWeek(exId){
   const by = {};
   for (const s of sessions){
-    if (!sameProg(s) || progExcluded(s, exId)) continue;
+    if (!sameProg(s) || s.deload || progExcluded(s, exId)) continue;
     const sets = workSets(s.entries && s.entries[exId]);
     if (!sets || !sets.some(x=>x.r>0)) continue;
     const k = weekKey(s.date);
@@ -3717,7 +3877,7 @@ function firstOfWeekHistory(exId, n){
 function historyFor(exId, n){
   const out=[];
   for (let i=sessions.length-1;i>=0 && out.length<n;i--){
-    if (!sameProg(sessions[i]) || progExcluded(sessions[i], exId)) continue;
+    if (!sameProg(sessions[i]) || sessions[i].deload || progExcluded(sessions[i], exId)) continue;
     const sets = workSets(sessions[i].entries && sessions[i].entries[exId]);
     if (sets && sets.length) out.push({sets, date:sessions[i].date});
   }
@@ -3727,7 +3887,7 @@ function historyFor(exId, n){
 function round5(x){ return Math.max(5, Math.round(x/5)*5); }
 let _dlVal=null, _dlKey=null;
 function deloadActive(){
-  const _k = sessionsRev+"|"+deloadSkips.length+"|"+DELOAD_EVERY+"|"+weekKey(new Date().toISOString());
+  const _k = sessionsRev+"|"+deloadSkips.length+"|"+DELOAD_EVERY+"|"+curProg()+"|"+weekKey(new Date().toISOString());
   if (_dlKey===_k) return _dlVal;
   _dlKey=_k; _dlVal=_deloadActiveRaw(); return _dlVal;
 }
@@ -3737,6 +3897,8 @@ function _deloadActiveRaw(){
   const resets = sessions.filter(s=>s.deload).map(s=>weekKey(s.date)).concat(deloadSkips).sort();
   const lastReset = resets.length ? resets[resets.length-1] : null;
   const cur = weekKey(new Date().toISOString());
+  if (deloadSkips.includes(cur)) return false;
+  if (sessions.some(s=>s.deload && sameProg(s) && weekKey(s.date)===cur)) return true;   // started this week: finish the week
   const done = wks.filter(w=> w<cur && (!lastReset || w>lastReset));
   return done.length >= DELOAD_EVERY-1;
 }
@@ -3748,17 +3910,20 @@ function skipDeload(){
   render();
 }
 function _planInputsStamp(){
-  return sessionsRev+"|"+deloadSkips.length+"|"+curProg()+"|"+weekKey(new Date().toISOString())+"|"+JSON.stringify(subs);
+  return sessionsRev+"|"+deloadSkips.length+"|"+curProg()+"|"+dayKey()+"|"+JSON.stringify(subs);
 }
 let _pfCache = Object.create(null), _pfStamp = null;
 function planFor(e){
   const st = _planInputsStamp();
   if (_pfStamp !== st){ _pfCache = Object.create(null); _pfStamp = st; }
-  const hit = _pfCache[e.id]; if (hit) return hit;
-  return (_pfCache[e.id] = _planForRaw(e));
+  const ck = e.id+"|"+e.min+"|"+e.max+"|"+e.sets+"|"+(e.bw?1:0)+"|"+(e.prog||"")+"|"+(e.rpeCap||0)+"|"+(e.inc||0)+"|"+(e.unit||"");
+  const hit = _pfCache[ck]; if (hit) return hit;
+  return (_pfCache[ck] = _planForRaw(e));
 }
 function _planForRaw(e){
   let last = lastEntryFor(e.id);
+  // logged with no weight at all: treat as a bodyweight lift instead of prescribing "5 lb"
+  if (last && !e.bw && !last.sets.some(s=>s.w>0)) e = Object.assign({}, e, {bw:true});
   const pol = policyOf(e);
   if (pol==="off"){
     if (!last) return {mode:"off", sets:null, last:null, pol};
@@ -3773,8 +3938,10 @@ function _planForRaw(e){
       // already trained this lift earlier this week: hold that session's working weight
       const topW = Math.max(...wkFirst.sets.map(s=>s.w||0));
       const n = Math.max(e.sets, 1);
-      return {mode:"hold", last:wkFirst, topW, bw:!!e.bw,
-        sets:Array.from({length:n},()=>({w: e.bw?0:topW, r:e.min}))};
+      // timed work repeats the time it held on that first session, not the bottom of the range
+      const holdR = pol==="time" ? Math.max(e.min, Math.min(...wkFirst.sets.map(s=>s.r))) : e.min;
+      return {mode:"hold", last:wkFirst, topW, bw:!!e.bw, pol,
+        sets:Array.from({length:n},()=>({w: e.bw?0:topW, r:holdR}))};
     }
     // first session of the week: progress off the most recent prior week's first session
     const prior = Object.keys(by).filter(k=>k<todayK).sort();
@@ -3811,8 +3978,8 @@ function _planForRaw(e){
       sets:Array.from({length:n},(_,i)=>({w:e.bw?0:topW, r: pol==="linear" ? e.min : (last.sets[i]?Math.min(last.sets[i].r,e.max):e.min)}))};
     if (e.bw) return {mode:"add", last, topW:0, bw:true, pol,
       sets:Array.from({length:n},()=>({w:0, r:e.max}))};
-    return {mode:"add", last, topW, pol,
-      sets:Array.from({length:n},()=>({w:topW+INC, r:e.min}))};
+    return {mode:"add", last, topW, pol, inc:(e.inc||INC),
+      sets:Array.from({length:n},()=>({w:topW+(e.inc||INC), r:e.min}))};
   }
   if (pol==="linear") return {mode:"beat", last, topW, pol,
     sets:Array.from({length:n},()=>({w:e.bw?0:topW, r:e.min}))};
@@ -3824,7 +3991,7 @@ function unitTxt(e){ return e.unit==="sec" ? "seconds" : "reps"; }
 function explanText(e, plan){
   switch (plan.mode){
     case "deload": return "deload";
-    case "add": return "\u25B2 +"+INC+" lb";
+    case "add": return plan.bw ? "\u25B2 add reps" : "\u25B2 +"+(plan.inc||INC)+" lb";
     case "addtime": return "\u25B2 +"+TIME_STEP+" s";
     case "capped": return "capped";
     case "hold": return e.bw ? "hold" : "hold "+plan.topW;
@@ -3846,7 +4013,8 @@ function coachCopy(e, plan){
         : "Hit "+e.max+"+ on all sets last time. Load "+plan.sets[0].w+" lb, target "+rngTxt(e)+" reps.");
     case "addtime": return "Held "+e.max+"+ s on every set. Add time: "+plan.sets[0].r+" s"+(e.bw?"":" at "+plan.topW+" lb")+".";
     case "capped": return "Reps were there, but the hardest set was "+effPhrase(plan.eff)+" (cap "+effPhrase(plan.cap)+"). Same "+(e.bw?"reps":plan.topW+" lb")+" \u2014 the weight goes up once it moves easier.";
-    case "hold": return e.bw ? "Repeat this week \u2014 match the range ("+rngTxt(e)+" "+unitTxt(e)+"). Progression happens on your first session of the week."
+    case "hold": if (plan.pol==="time") return "Repeat this week \u2014 hold "+plan.sets[0].r+" s"+(e.bw?"":" at "+plan.topW+" lb")+". Time only goes up on your first session of the week.";
+      return e.bw ? "Repeat this week \u2014 match the range ("+rngTxt(e)+" "+unitTxt(e)+"). Progression happens on your first session of the week."
       : "Repeat this week \u2014 hold "+plan.topW+" lb from "+new Date(plan.last.date).toLocaleDateString(undefined,{weekday:"long"})+", "+rngTxt(e)+" crisp reps. Weight only goes up on your first session of the week.";
     case "beat":
       if (plan.pol==="linear") return "Missed reps last time ("+ls.map(s=>s.r).join(" / ")+"). Same "+plan.topW+" lb \u2014 get "+e.min+" on every set.";
@@ -3970,8 +4138,8 @@ function isStalled(exId){
   if (h.length < 3) return false;
   const tops = h.map(x=>Math.max(...x.sets.map(s=>s.w)));
   if (!(tops[0]===tops[1] && tops[1]===tops[2])) return false;
-  const best = h.map(x=>Math.max(...x.sets.map(s=>s.r)));
-  return best[0] <= best[2];
+  const total = h.map(x=>x.sets.reduce((a,s)=>a+(s.r||0),0));
+  return total[0] <= total[2];
 }
 // ================= Body metrics =================
 let bwDraft = {w:"", waist:""};
@@ -4093,7 +4261,7 @@ function consistencyWeeks(n){
   now.setDate(now.getDate()-day); now.setHours(0,0,0,0);
   for (let i=n-1;i>=0;i--){
     const wkStart=new Date(now.getTime()-i*7*86400000);
-    const key=wkStart.toISOString().slice(0,10);
+    const key=dayKey(wkStart);
     out.push({key, n:sessions.filter(s=>weekKey(s.date)===key).length});
   }
   return out;
@@ -4138,7 +4306,7 @@ function weeklyVolumes(){
   }
   _wvRev = sessionsRev;
   _wvCache = Object.entries(byWeek).sort((a,b)=>a[0].localeCompare(b[0]))
-    .map(([k,v])=>({week:k, label:fmtDate(k), value:Math.round(v)}));
+    .map(([k,v])=>({week:k, label:fmtDate(k+"T12:00:00"), value:Math.round(v)}));
   return _wvCache;
 }
 function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -4228,7 +4396,7 @@ function computeInsights(){
   if (whoopDays.length>=10 && strength.length>=6){
     const hi=[], lo=[];
     strength.forEach(s=>{
-      const d = recByDay[s.date.slice(0,10)];
+      const d = recByDay[dayKey(new Date(s.date))];
       if (!d || d.recovery_score==null) return;
       if (d.recovery_score>=67) hi.push(sessVol(s));
       else if (d.recovery_score<50) lo.push(sessVol(s));
@@ -4248,7 +4416,7 @@ function computeInsights(){
   if (whoopDays.length>=10 && strength.length>=6){
     const good=[], poor=[];
     strength.forEach(s=>{
-      const d = recByDay[s.date.slice(0,10)];
+      const d = recByDay[dayKey(new Date(s.date))];
       if (!d || d.sleep_hours==null) return;
       if (d.sleep_hours>=7.5) good.push(sessVol(s));
       else if (d.sleep_hours<6.5) poor.push(sessVol(s));
@@ -4294,7 +4462,7 @@ function computeInsights(){
   // 4) Stalls + recovery context
   {
     const stalled = [];
-    for (const wid of Object.keys(WORKOUTS)) for (const e of effEx(wid)) if (isStalled(e.id) && !stallMutes.includes(e.id) && !stalled.includes(e.name)) stalled.push(e.name);
+    for (const wid of Object.keys(WORKOUTS)) for (const e of effEx(wid)) if (!stallMutes.includes(e.id) && !stalled.includes(e.name) && !/^(capped|off)$/.test(planFor(e).mode) && isStalled(e.id)) stalled.push(e.name);
     const r7 = avgOf(whoopDays,"recovery_score",7);
     if (stalled.length>=2 && r7!=null && r7<50)
       out.push({lvl:"warn", pri: 1,
@@ -4375,7 +4543,7 @@ function renderTrain(){
     for (const e of exs){
       plans[e.id] = planFor(e);                                   // planFor -> workSets(): invariant preserved
       if (plans[e.id].mode==="add"||plans[e.id].mode==="addtime") readyCount++;
-      if (isStalled(e.id)) stallsRaw.push({id:e.id, name:e.name});
+      if (plans[e.id].mode!=="capped" && plans[e.id].mode!=="off" && isStalled(e.id)) stallsRaw.push({id:e.id, name:e.name});
     }
     _pc = _planCache[workoutId] = {plans, readyCount, stallsRaw};
   }
@@ -4400,13 +4568,18 @@ function renderTrain(){
       acct += '<div class="sit disp">Check your email</div><p class="sic">Sign-in link sent to <b>'+esc(signinSent)+'</b>. Tap it on this phone and you\u2019ll land back here, signed in. Your local log carries over automatically.</p>';
       acct += '<button class="silink" onclick="signinSent=null;render()">Use a different email</button>';
     } else {
+      if (!siOpen){
+        acct = '<button class="signin sibar a" onclick="siOpen=true;render()"><span><b>Sign in to sync</b><span class="sibarsub">Your log lives on this device only</span></span><span class="sibargo" aria-hidden="true">\u203A</span></button>';
+      } else {
       acct += '<div class="sit disp">Sign in to sync</div><p class="sic">Your log currently lives on this device only. Sign in (or create an account) and it follows you anywhere.</p>';
-      acct += '<div class="namerow"><input id="si_first" placeholder="First name"><input id="si_last" placeholder="Last name"></div>';
+      acct += '<div class="namerow"><input id="si_first" placeholder="First name" autocomplete="given-name"><input id="si_last" placeholder="Last name" autocomplete="family-name"></div>';
       acct += '<input class="fullinput" id="si_email" inputmode="email" autocapitalize="off" autocorrect="off" placeholder="you@email.com">';
       acct += '<div class="sirow"><input id="si_pw" type="password" placeholder="Password"><button class="sibtn" onclick="signInPw()">Sign in</button></div>';
       acct += '<button class="silink" onclick="signUpPw()">New? Create account with these details</button>';
+      acct += '<button class="silink skiplink" onclick="siOpen=false;render()">Not now</button>';
+      }
     }
-    acct += '</div>';
+    if (signinSent || siOpen) acct += '</div>';
   }
   // ===== Path picker (signed in, no program assigned) =====
   if (auth && profile && !profile.program_id){
@@ -4520,7 +4693,7 @@ function renderTrain(){
   exs.forEach((e,i)=>{
     const plan = plans[e.id];
     const rows = rowsFor(e, plan);
-    const full = rows.every(s=>Number(s.r)>0&&(e.bw||s.w!==""));
+    const full = rows.every(s=>Number(s.r)>0);
     h += '<div class="exc a'+(full?" full":"")+'" id="row_'+e.id+'" style="animation-delay:'+(Math.min(i,8)*22)+'ms">';
     const presId = e.subOf ? e.subOf.id : e.id;
     h += '<div class="exhead"><span class="exidx num">'+(full?"\u2713":i+1)+'</span>'
@@ -4554,7 +4727,7 @@ function renderTrain(){
       h += '<div class="setrow'+(e.bw?" bwrow":"")+(si>=e.sets?" rm":"")+(st?" t"+st:"")+'">'
         + '<button class="setlbl'+(st?" tagged":"")+'" onclick="cycleSetType(\''+e.id+'\','+si+')" aria-label="set '+(si+1)+' type: '+(setTypeLabel(st)||"working")+'">'
         + (setTypeLabel(st) || ("Set "+(si+1))) + '</button>'
-        + (e.bw ? '' : stepper(e.id,si,"w",row.w,5))
+        + (e.bw ? '' : stepper(e.id,si,"w",row.w,(e.inc||INC||5)))
         + stepper(e.id,si,"r",row.r,(e.unit==="sec"?5:1),e.unit)
         + (si>=e.sets ? '<button class="rmset" onclick="removeSet(\''+e.id+'\','+si+')" aria-label="remove set '+(si+1)+'">\u2715</button>' : '')
         +'</div>';
@@ -4640,7 +4813,7 @@ function sessionTally(w){
     total += rows.length;
     rows.forEach(r=>{
       const wt=Number(r.w)||0, rp=Number(r.r)||0;
-      if (rp>0&&(e.bw||r.w!=="")){ done++; if (r.t!=="w") vol+=wt*rp; }
+      if (rp>0){ done++; if (r.t!=="w") vol+=wt*rp; }
     });
   }
   return {sets:done, total, vol:Math.round(vol)};
@@ -4693,7 +4866,7 @@ function refreshCard(exId){
   const el = document.getElementById("row_"+exId); if (!el) return;
   const rows = values[exId] || [];
   const e = findEx(exId);
-  const full = rows.length && rows.every(s=>Number(s.r)>0&&((e&&e.bw)||s.w!==""));
+  const full = rows.length && rows.every(s=>Number(s.r)>0);
   el.classList.toggle("full", !!full);
 }
 function liveTally(){
@@ -4706,6 +4879,7 @@ function startRest(exId){
   const w = WORKOUTS[workoutId] || {};
   const secs = (e && e.rest) || PROG_REST || (w.tag==="PUMP" ? 75 : 120);
   restEnd = Date.now() + secs*1000;
+  restCuePrime();
   if (restInt) clearInterval(restInt);
   restInt = setInterval(tickRest, 500);
   tickRest();
@@ -4718,21 +4892,47 @@ function stopRest(){
   const p = document.getElementById("restplus");
   if (p) p.style.display = "none";
 }
+// Rest-over cue: a short double beep. The audio context is created on the tap that starts
+// the timer, because browsers only allow sound that begins from a user action.
+let _restAC = null;
+function restCuePrime(){
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    if (!_restAC) _restAC = new AC();
+    if (_restAC.state==="suspended") _restAC.resume();
+  } catch(e){}
+}
+function restCue(){
+  try {
+    if (!_restAC || _restAC.state!=="running") return;
+    const t0 = _restAC.currentTime;
+    [0, 0.22].forEach(dt=>{
+      const o = _restAC.createOscillator(), g = _restAC.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t0+dt); g.gain.exponentialRampToValueAtTime(0.25, t0+dt+0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0+dt+0.16);
+      o.connect(g); g.connect(_restAC.destination); o.start(t0+dt); o.stop(t0+dt+0.18);
+    });
+  } catch(e){}
+}
 function tickRest(){
+  if (!restEnd){ if (restInt){ clearInterval(restInt); restInt=null; } return; }
   const el = document.getElementById("restchip");
-  if (!el) return;
   const left = Math.ceil((restEnd - Date.now())/1000);
   if (left <= 0){
+    // fire the cue and stop the clock even when the chip is not on screen (another tab of the app)
+    if (restInt){ clearInterval(restInt); restInt=null; }
+    if (navigator.vibrate) try{ navigator.vibrate([120,60,120]); }catch(e){}
+    restCue();
+    setTimeout(()=>{ if (restEnd && Date.now()>restEnd) stopRest(); }, 2500);
+    if (!el) return;
     el.textContent = "GO \u2014 next set";
     el.className = "restchip go";
     el.style.display = "";
     const pp = document.getElementById("restplus");
     if (pp) pp.style.display = "none";
-    if (navigator.vibrate) try{ navigator.vibrate([120,60,120]); }catch(e){}
-    clearInterval(restInt); restInt=null;
-    setTimeout(()=>{ if (Date.now()>restEnd) stopRest(); }, 2500);
     return;
   }
+  if (!el) return;
   el.style.display = "";
   el.className = "restchip";
   el.textContent = "REST "+Math.floor(left/60)+":"+String(left%60).padStart(2,"0")+" \u00B7 tap to skip";
@@ -4745,7 +4945,10 @@ function prefillPlan(exId){
   const e = findEx(exId);
   const plan = planFor(e);
   if (!plan.sets) return;
-  values[exId] = plan.sets.map(s=>({w:String(s.w), r:""}));
+  const old = values[exId] || [];
+  const rows = plan.sets.map((s,i)=>Object.assign({r:""}, old[i]||{}, {w:String(s.w)}));
+  for (let i=plan.sets.length; i<old.length; i++) rows.push(old[i]);   // extra sets already added stay
+  values[exId] = rows;
   saveDraft();
   render();
 }
@@ -4771,7 +4974,10 @@ function fillAll(){
     if (e.bw) continue;
     const plan = planFor(e);
     if (!plan.sets) continue;
-    values[e.id] = plan.sets.map(s=>({w:String(s.w), r:""}));
+    const old = values[e.id] || [];
+    const rows = plan.sets.map((s,i)=>{ const o = Object.assign({w:"", r:""}, old[i]||{}); if (o.w==="" || o.w==null) o.w = String(s.w); return o; });
+    for (let i=plan.sets.length; i<old.length; i++) rows.push(old[i]);
+    values[e.id] = rows;
     filled++;
   }
   saveDraft();
@@ -4783,16 +4989,20 @@ function saveSession(){
   const w = WORKOUTS[workoutId];
   // Entered numbers persist after saving, so a second press would duplicate the session.
   // Confirm instead of blocking \u2014 two real sessions in one day is legitimate.
+  let upd = null;
   {
-    const dup = sessions.some(s=>!s.activity && s.workout===workoutId && sameProg(s) && dayKey(new Date(s.date))===dayKey());
-    if (dup && !confirm("You already logged "+workoutId+" today. Save another session with these numbers?")) return;
+    const dup = sessions.filter(s=>!s.activity && s.workout===workoutId && sameProg(s) && dayKey(new Date(s.date))===dayKey()).pop();
+    if (dup){
+      if (confirm("You already saved "+workoutId+" today.\n\nOK: update that session with these numbers.\nCancel: more options.")) upd = dup;
+      else if (!confirm("Save these numbers as a second, separate session instead?")) return;
+    }
   }
   const entries = {}; let logged=0; const prs=[];
-  const isDl = deloadActive();
+  const isDl = upd ? !!upd.deload : deloadActive();
   // all-time best weight per lift BEFORE this session (excludes deloads), for genuine-PR detection
   const bestBefore = {};
   for (const s of sessions){
-    if (s.deload) continue;
+    if (s.deload || s===upd) continue;
     for (const [id,sets] of Object.entries(s.entries||{})){
       const top = Math.max(0, ...workSets(sets).map(x=>x.w||0));
       if (top>0 && (bestBefore[id]===undefined || top>bestBefore[id])) bestBefore[id]=top;
@@ -4800,7 +5010,7 @@ function saveSession(){
   }
   for (const e of effEx(workoutId)){
     const rows = values[e.id]; if (!rows) continue;
-    const clean = rows.filter(s=>Number(s.r)>0&&(e.bw||s.w!=="")).map(s=>{ const o={w:Number(s.w)||0,r:Number(s.r)||0}; if (s.t) o.t=s.t; if (s.e) o.e=Number(s.e); return o; });
+    const clean = rows.filter(s=>Number(s.r)>0).map(s=>{ const o={w:Number(s.w)||0,r:Number(s.r)||0}; if (s.t) o.t=s.t; if (s.e) o.e=Number(s.e); return o; });
     if (clean.length){
       const cleanWork = workSets(clean);
       const newTop = Math.max(0, ...cleanWork.map(s=>s.w));
@@ -4814,7 +5024,9 @@ function saveSession(){
     }
   }
   if (!logged){ toast("Nothing to save \u2014 confirm at least one set."); return; }
-  const sess = {id:Date.now(), date:new Date().toISOString(), workout:workoutId, entries, prog:curProg()};
+  const sess = upd ? {id:upd.id, date:upd.date, workout:workoutId, entries, prog:curProg(), rev:(upd.rev||0)+1}
+                   : {id:Date.now(), date:new Date().toISOString(), workout:workoutId, entries, prog:curProg()};
+  if (upd && upd.mins) sess.mins = upd.mins;
   if (wkStart){
     const mins = Math.round((Date.now()-wkStart)/60000);
     if (mins>=1 && mins<=360) sess.mins = mins;   // sanity: ignore <1 min and >6 h (left running)
@@ -4826,15 +5038,16 @@ function saveSession(){
   const exN = {};
   for (const k of Object.keys(noteDrafts)) if (noteDrafts[k] && noteDrafts[k].trim() && entries[k]) exN[k]=noteDrafts[k].trim();
   if (Object.keys(exN).length) sess.exNotes = exN;
-  sessions.push(sess); bumpSessions();
+  if (upd) sessions[sessions.indexOf(upd)] = sess; else sessions.push(sess);
+  bumpSessions();
   // Numbers stay on screen after saving \u2014 they clear on day rollover or an explicit clear.
-  persist(); adjustOpen=null; pickerFor=null; noteOpen=null; stopRest(); saveDraft();
+  const stored = persist(); adjustOpen=null; pickerFor=null; noteOpen=null; stopRest(); saveDraft();
   wkStart = 0; if (wkTimerInt){ clearInterval(wkTimerInt); wkTimerInt=null; }
   render();
   pushLog();
   // celebratory PR moment fires AFTER save completes, never mid-workout
   if (prs.length) showPR(prs);
-  else { haptic("save"); toast("Saved \u2014 "+logged+" lifts logged."); }
+  else if (stored){ haptic("save"); toast((upd?"Updated":"Saved")+" \u2014 "+logged+" lifts logged."); }
 }
 let prCelebrating = false;
 function showPR(prs){
@@ -5364,7 +5577,7 @@ function renderAthleteDetail(){
   for (let i=ss.length-1;i>=0;i--){
     const x=ss[i]; let vol=0;
     Object.values(x.entries||{}).forEach(sets=>volSets(sets).forEach(e=>{vol+=(e.w||0)*e.r;}));
-    h += '<option value="'+x.id+'"'+(i===idx?' selected':'')+'>'+fmtDate(x.date)+' \u00B7 '+(x.activity?esc(x.activity.name):esc(x.workout))+(x.deload?' \u00B7 deload':'')+' \u00B7 '+(x.activity?(x.activity.mins||0)+' min':(vol>=1000?(vol/1000).toFixed(1)+'k':Math.round(vol))+' lb')+'</option>';
+    h += '<option value="'+Number(x.id)+'"'+(i===idx?' selected':'')+'>'+fmtDate(x.date)+' \u00B7 '+(x.activity?esc(x.activity.name):esc(x.workout))+(x.deload?' \u00B7 deload':'')+' \u00B7 '+(x.activity?(Number(x.activity.mins)||0)+' min':(vol>=1000?(vol/1000).toFixed(1)+'k':Math.round(vol))+' lb')+'</option>';
   }
   h += '</select></div>';
   if (s.deload) h += '<p class="statline">Deload session \u2014 planned half loads; dips here are by design.</p>';
@@ -5373,13 +5586,13 @@ function renderAthleteDetail(){
     const ex = (a.notes||[]).find(n=>n.session_id===s.id);
     const draft = coachNoteDrafts[s.id]!==undefined ? coachNoteDrafts[s.id] : (ex?ex.body:"");
     h += '<div class="menusect" style="margin-top:12px">Feedback to '+esc(a.name.split(" ")[0])+'</div>';
-    h += '<textarea class="notearea" rows="2" placeholder="e.g. Drop leg press 10% \u2014 pain-free depth only" onchange="coachNoteDrafts['+s.id+']=this.value">'+esc(draft)+'</textarea>';
-    h += '<button class="sibtn fullw" style="margin-top:8px" onclick="saveCoachNote(\''+a.uid+'\','+s.id+')">'+(ex?'Update note':'Send note')+'</button>';
+    h += '<textarea class="notearea" rows="2" placeholder="e.g. Drop leg press 10% \u2014 pain-free depth only" onchange="coachNoteDrafts['+Number(s.id)+']=this.value">'+esc(draft)+'</textarea>';
+    h += '<button class="sibtn fullw" style="margin-top:8px" onclick="saveCoachNote(\''+esc(String(a.uid).replace(/[^a-f0-9-]/gi,""))+'\','+Number(s.id)+')">'+(ex?'Update note':'Send note')+'</button>';
     if (ex) h += '<p class="statline">Sent '+fmtDate(ex.created_at)+'</p>';
   }
   h += '</div>';
   if (s.activity){
-    h += '<div class="panel a"><p class="statline">Activity session: <b>'+esc(s.activity.name)+'</b>'+(s.activity.mins?' \u00B7 '+s.activity.mins+' min':'')+'</p></div>';
+    h += '<div class="panel a"><p class="statline">Activity session: <b>'+esc(s.activity.name)+'</b>'+(s.activity.mins?' \u00B7 '+Number(s.activity.mins)+' min':'')+'</p></div>';
     return h;
   }
   h += whoopPanel(a.days, "Recovery \u0026 sleep", a.sessions);
@@ -5392,7 +5605,7 @@ function renderAthleteDetail(){
     const bw = sets.every(x=>!x.w);
     h += '<tr><td class="ln">'+esc(exDisplayName(exId))
       +((s.exNotes&&s.exNotes[exId])?'<span class="lnote">\u270E '+esc(s.exNotes[exId])+'</span>':'')
-      +'</td><td class="num sets">'+sets.map(x=>bw? x.r : (x.w+"\u00D7"+x.r)).join(" \u00B7 ")+'</td>'
+      +'</td><td class="num sets">'+sets.map(x=>bw? Number(x.r)||0 : ((Number(x.w)||0)+"\u00D7"+(Number(x.r)||0))).join(" \u00B7 ")+'</td>'
       +'<td class="trc">'+(s.deload?'<span class="tr flat">DL</span>':trendMark(sets, prev))+'</td></tr>';
   }
   h += '</tbody></table></div>';
@@ -5409,7 +5622,7 @@ function renderCoach(){
     if (open.length){
       h += '<h2 class="sect disp a">Inbox <span class="fbcount num">'+open.length+'</span></h2><div class="panel a">';
       open.slice(0,12).forEach(f=>{
-        const who = coachData.athletes.find(a=>a.user_id===f.user_id) || null;
+        const who = coachData.athletes.find(a=>a.uid===f.user_id) || null;
         h += '<div class="fbrow"><div class="fbmain">'
           +'<span class="fbwho">'+esc(who?who.name:"Unknown")+'</span>'
           +'<span class="tlbadge '+(f.kind==="bug"?"dl":"act")+'">'+(f.kind==="bug"?"BUG":"IDEA")+'</span>'
@@ -5464,9 +5677,13 @@ function importData(input){
       if (!Array.isArray(p.sessions)) throw 0;
       const ids = new Set(sessions.map(s=>s.id));
       let added=0;
-      p.sessions.forEach(s=>{ if(!ids.has(s.id)){ sessions.push(s); added++; } }); bumpSessions();
+      cleanSessions(p.sessions).forEach(s=>{ if(!ids.has(s.id)){ sessions.push(s); added++; } }); bumpSessions();
       sessions.sort((a,b)=>a.id-b.id);
-      persist(); toast("Imported "+added+" sessions."); render();
+      const mids = new Set(metrics.map(m=>m.id));
+      cleanMetrics(p.metrics).forEach(m=>{ if(!mids.has(m.id)) metrics.push(m); });
+      metrics.sort((a,b)=>a.id-b.id);
+      (Array.isArray(p.deloadSkips)?p.deloadSkips:[]).forEach(k=>{ if (typeof k==="string" && /^\d{4}-\d{2}-\d{2}$/.test(k) && !deloadSkips.includes(k)) deloadSkips.push(k); });
+      persist(); if (auth) pushLog(); toast("Imported "+added+" sessions."); render();
     } catch(e){ toast("Invalid backup file."); }
   };
   rd.readAsText(f);
@@ -5476,6 +5693,9 @@ function importData(input){
 let draftRestored = false;
 try {
   const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
+  const _fresh = d && Date.now()-d.t < DRAFT_TTL && d.values && hasEntered(d.values);
+  const _carry = _fresh && d.day && d.day !== dayKey() && d.workoutId && WORKOUTS[d.workoutId] && !draftIsSaved(d.day, d.workoutId);
+  if (_carry) d.day = dayKey();          // unsaved workout from before midnight: bring it across
   if (d && d.day && d.day !== dayKey()) clearDraft();
   else if (d && d.day===dayKey() && Date.now()-d.t < DRAFT_TTL && d.values && Object.keys(d.values).length){
     // only restore the selected workout when the draft is from TODAY, so yesterday's
@@ -5526,6 +5746,40 @@ render();
 if (draftRestored) setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400);
 bootBackend();
 
+
+// ===== v16.2: keyboard and screen-reader support =====
+(function(){
+  // Escape closes whatever is on top; Enter/Space works on anything marked as a button.
+  document.addEventListener("keydown", function(ev){
+    if (ev.key==="Escape"){
+      const pr = document.querySelector(".protal"); if (pr){ dismissPR(); return; }
+      const backs = document.querySelectorAll(".sheetback, .menuback");
+      if (backs.length){ ev.preventDefault(); backs[backs.length-1].click(); }
+      return;
+    }
+    if (ev.key==="Enter" || ev.key===" "){
+      const t = ev.target;
+      if (t && t.getAttribute && t.getAttribute("role")==="button" && !/^(BUTTON|A|INPUT|TEXTAREA|SELECT)$/.test(t.tagName)){ ev.preventDefault(); t.click(); }
+    }
+  });
+  // Fields that only carry a placeholder get the same text as their accessible name.
+  let queued = false;
+  function label(){
+    queued = false;
+    document.querySelectorAll("input[placeholder]:not([aria-label]):not([aria-labelledby]), textarea[placeholder]:not([aria-label]):not([aria-labelledby])").forEach(el=>{
+      if (el.id && document.querySelector('label[for="'+el.id+'"]')) return;
+      el.setAttribute("aria-label", el.getAttribute("placeholder"));
+    });
+  }
+  try {
+    new MutationObserver(()=>{ if (!queued){ queued = true; setTimeout(label, 60); } }).observe(document.body, {childList:true, subtree:true});
+    label();
+  } catch(e){}
+})();
+// ===== v16.2: service worker keeps the app shell current and available offline =====
+if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)){
+  window.addEventListener("load", ()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); });
+}
 </script>
 </body>
 </html>

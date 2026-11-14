@@ -222,7 +222,7 @@ function nBody(ctx){
   const pnoe = nLatest(ctx.bc, r=>r.method==="pnoe" && r.rmr_kcal);
   const est = nLatest(ctx.bc, r=>(r.method==="estimate"||r.method==="scale") && r.body_fat_pct);
   const m = (ctx.metrics||[]).filter(x=>x && +x.w>0).sort((x,y)=>x.date<y.date?1:-1)[0] || null;
-  const mDay = m ? String(m.date).slice(0,10) : null;
+  const mDay = m ? (typeof dayKey==="function" && !isNaN(Date.parse(m.date)) ? dayKey(new Date(m.date)) : String(m.date).slice(0,10)) : null;
   const scanW = nLatest(ctx.bc, r=>+r.weight_lb>0);
   if (m && (!scanW || mDay >= scanW.measured_on)){ out.wt = +m.w; out.src.wt = "weigh-in "+nDate(mDay); }
   else if (scanW){ out.wt = +scanW.weight_lb; out.src.wt = (scanW.method==="dexa"?"DEXA ":"entry ")+nDate(scanW.measured_on); }
@@ -319,6 +319,7 @@ async function nLoad(force){
       sb("/rest/v1/meal_items?select=name,food_id,recipe_id,servings,grams,kcal,protein_g,carb_g,fat_g,fiber_g&user_id=eq."+uid+"&order=created_at.desc&limit=60"),
       sb("/rest/v1/recipes?select=*,recipe_items(*)&user_id=eq."+uid+"&order=updated_at.desc"));
     const [m, g, w, bc, rc, rp] = await Promise.all(reqs);
+    if (!m.ok) throw new Error("meals "+m.status);
     if (m.ok){ nut.meals = await m.json(); nut.meals.forEach(x=>(x.meal_items||[]).sort((a,b)=>a.created_at<b.created_at?-1:1)); }
     if (g.ok){ const rows = await g.json(); nut.goal = rows[0]||null; }
     if (w.ok){ nut.week = {}; (await w.json()).forEach(r=>{ nut.week[r.eaten_on] = +r.kcal; }); }
@@ -327,8 +328,8 @@ async function nLoad(force){
       nut.recent = rows.filter(r=>{ const k=r.name.toLowerCase(); if (seen[k]) return false; seen[k]=1; return true; }).slice(0,12); }
     if (rp && rp.ok){ nut.recipes = await rp.json(); nut.recipes.forEach(r=>(r.recipe_items||[]).sort((a,b)=>a.position-b.position)); }
     if (needStatic) nut.staticLoaded = true;
-    nut.loadedFor = day;
-  } catch(e){ toast("Couldn\u2019t load food log."); }
+    nut.loadedFor = day; nut.failedFor = null;
+  } catch(e){ nut.failedFor = day; }
   nut.loading = false;
   if (tab==="food") render();
 }
@@ -364,10 +365,11 @@ function nNormUsda(f){
   let kcal = by["208"] ?? by[1008] ?? by["957"] ?? by[2047] ?? by["958"] ?? by[2048];
   if (kcal==null) kcal = p*4 + c*4 + fat*9;
   const u = (f.servingSizeUnit||"").toLowerCase();
-  const sg = (u==="g"||u==="grm") && +f.servingSize>0 ? +f.servingSize : null;
+  // ml is treated as grams (drinks, oils): close enough, and far better than assuming 100 g
+  const sg = (u==="g"||u==="grm"||u==="ml"||u==="mlt") && +f.servingSize>0 ? +f.servingSize : null;
   return nFromPer100({ source:"usda", source_id:String(f.fdcId), barcode: f.gtinUpc || null,
     name: nTitle(f.description||"Food"), brand: f.brandOwner || f.brandName || "" },
-    { kcal, p, c, f:fat, fiber: by["291"] ?? by[1079] ?? null }, sg, f.householdServingFullText || null);
+    { kcal, p, c, f:fat, fiber: by["291"] ?? by[1079] ?? null }, sg, sg ? (f.householdServingFullText || null) : null);
 }
 function nNormOff(p){
   const n = p.nutriments||{};
@@ -376,7 +378,12 @@ function nNormOff(p){
   return nFromPer100({ source:"off", source_id:String(p.code||""), barcode: p.code || null,
     name: p.product_name || "Product", brand: (p.brands||"").split(",")[0].trim() },
     { kcal, p:n.proteins_100g||0, c:n.carbohydrates_100g||0, f:n.fat_100g||0, fiber: n.fiber_100g!=null ? n.fiber_100g : null },
-    +p.serving_quantity>0 ? +p.serving_quantity : null, p.serving_size || null);
+    nOffServing(p), nOffServing(p) ? (p.serving_size || null) : null);
+}
+function nOffServing(p){
+  if (+p.serving_quantity>0) return +p.serving_quantity;
+  const m = /([\d.]+)\s*(g|ml)\b/i.exec(p.serving_size||"");
+  return m && +m[1]>0 ? +m[1] : null;
 }
 function nFromRow(row){
   return { source:row.source, source_id:row.source_id, barcode:row.barcode, food_id:row.id, name:row.name, brand:row.brand||"",
@@ -522,7 +529,7 @@ async function nSearch(){
   if (/^\d{8,14}$/.test(q)){ nHandleBarcode(q); return; }
   const box = document.getElementById("nres"); if (box) box.innerHTML = '<p class="statline">Searching\u2026</p>';
   const safe = q.replace(/[^a-zA-Z0-9 ]+/g," ").trim().replace(/\s+/g,"*");
-  const mine = sb("/rest/v1/foods?select=*&source=eq.custom&or=(name.ilike.*"+encodeURIComponent(safe)+"*,brand.ilike.*"+encodeURIComponent(safe)+"*)&limit=6")
+  const mine = sb("/rest/v1/foods?select=*&source=eq.custom&created_by=eq."+auth.uid+"&or=(name.ilike.*"+encodeURIComponent(safe)+"*,brand.ilike.*"+encodeURIComponent(safe)+"*)&limit=6")
     .then(r=>r.ok ? r.json() : []).then(rows=>rows.map(nFromRow)).catch(()=>[]);
   const usda = nTimeout(fetch("https://api.nal.usda.gov/fdc/v1/foods/search?api_key="+FDC_KEY+"&pageSize=12&dataType=Foundation,SR%20Legacy,Survey%20(FNDDS),Branded&query="+encodeURIComponent(q)), 9000)
     .then(r=>r.ok ? r.json() : Promise.reject(r.status)).then(d=>(d.foods||[]).map(nNormUsda))
@@ -574,6 +581,7 @@ async function nScanOpen(){
     if ("BarcodeDetector" in window){
       const det = new window.BarcodeDetector({ formats:["ean_13","ean_8","upc_a","upc_e"] });
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (!document.getElementById("nscan")){ stream.getTracks().forEach(t=>t.stop()); return; }
       video.srcObject = stream; await video.play();
       nScanFocus(stream); nScanMsg(tip);
       let live = true; nScanCtl = { stop(){ live = false; } };
@@ -590,11 +598,12 @@ async function nScanOpen(){
     if (!document.getElementById("nscan")) return;
     const reader = new ZX.BrowserMultiFormatOneDReader(nZxHints(), { delayBetweenScanAttempts:120, delayBetweenScanSuccess:500 });
     nScanCtl = await reader.decodeFromConstraints(constraints, video, (res)=>{ if (res) done(res.getText()); });
+    if (!document.getElementById("nscan")){ try { nScanCtl.stop(); } catch(e){} try { (video.srcObject||{getTracks(){return[];}}).getTracks().forEach(t=>t.stop()); } catch(e){} return; }
     if (video.srcObject) nScanFocus(video.srcObject);
     nScanMsg(tip);
   } catch(e){
     const n = e && e.name;
-    nScanMsg(n==="NotAllowedError" ? "Camera access is blocked. Allow it in iPhone Settings, or snap a photo or type the number below."
+    nScanMsg(n==="NotAllowedError" ? "Camera access is blocked. Allow it in your device settings, or snap a photo or type the number below."
       : "Live scan unavailable ("+nErr(e)+"). Snap a photo or type the number below.");
   }
 }
@@ -930,7 +939,9 @@ function nRing(pct, state){
 function renderFood(){
   if (!auth) return '<div class="panel a"><p class="statline">Sign in to track food. Your log syncs to your account so your coach can see it.</p><button class="sibtn foodsignin" onclick="setTab(\'train\');setTimeout(function(){var f=document.getElementById(\'si_email\');if(f)f.focus();},50)">Sign in</button></div>';
   if (!nut.day) nut.day = dayKey();
+  if (nut.failedFor===nut.day && nut.loadedFor!==nut.day && !nut.loading) return '<div class="panel a"><p class="statline">Couldn\u2019t load your food log. Check your connection.</p><button class="sibtn foodsignin" onclick="nut.failedFor=null;nLoad(true)">Try again</button></div>';
   if (nut.loadedFor!==nut.day && !nut.loading) setTimeout(()=>nLoad(), 0);
+  if (nut.loadedFor!==nut.day) return '<div class="panel a"><p class="statline">Loading your food log\u2026</p></div>';
   if (nut.view==="add") return renderFoodAdd();
   if (nut.view==="pick") return renderFoodPick();
   if (nut.view==="label") return renderFoodLabel();
@@ -1362,7 +1373,15 @@ async function nBcSave(){
 async function nBcDelete(id){
   const W = nWho(); const row = W.bc.find(x=>x.id===id); if (!row) return;
   if (!confirm("Delete this "+(BC_LABEL[row.method]||"entry")+" from "+nDate(row.measured_on)+"?")) return;
-  try { const r = await sb("/rest/v1/body_comp?id=eq."+id, { method:"DELETE" }); if (!r.ok) throw new Error();
+  try {
+    let recs = [];
+    try { const q = await sb("/rest/v1/health_records?select=id,file_path&body_comp_id=eq."+id); if (q.ok) recs = await q.json(); } catch(e){}
+    for (const rec of recs){
+      await sb("/rest/v1/health_records?id=eq."+rec.id, { method:"DELETE" });
+      if (rec.file_path) await fetch(SUPA+"/storage/v1/object/health-records/"+rec.file_path, { method:"DELETE", headers:{ apikey:SUPA_KEY, Authorization:"Bearer "+auth.at } });
+    }
+    if (nut.rec && nut.rec.records) nut.rec.records = nut.rec.records.filter(x=>!recs.some(q=>q.id===x.id));
+    const r = await sb("/rest/v1/body_comp?id=eq."+id, { method:"DELETE" }); if (!r.ok) throw new Error();
     const i = W.bc.indexOf(row); if (i>=0) W.bc.splice(i,1); render(); }
   catch(e){ toast("Couldn\u2019t delete."); }
 }
@@ -1484,3 +1503,22 @@ function renderCoachNutrition(){
   h += '<div class="nbtnrow"><button class="sibtn" onclick="nut.records=true;nut.rec=null;render();nRecLoad()">'+first+'\u2019s health records</button></div>';
   return h;
 }
+
+// ---------- v16.2 ----------
+// Clear every per-account cache on sign-out so the next account never sees the last one's food log.
+function nReset(){
+  Object.assign(nut, { day:null, meals:[], goal:null, bc:[], recent:[], recipes:[], week:{}, details:null, bcForm:null,
+    coachUid:null, coach:null, loadedFor:null, failedFor:null, loading:false, view:null, target:null, results:[], pick:null,
+    label:null, recipe:null, goalEdit:false, draftMode:null, staticLoaded:false, rec:null, records:null, detailsOpen:false, cg:null });
+}
+// One action at a time: a double tap must not log a food or save a recipe twice.
+(function(){
+  const busy = {};
+  ["nLogItem","nAddFood","nLabelSave","nRecipeSave","nSaveGoal","nSaveDetails","nBcSave","nCgSave","nDeleteItem","nClearMeal","nRecSave","nRecDelete","nBcDelete"].forEach(name=>{
+    const f = window[name]; if (typeof f!=="function") return;
+    window[name] = async function(){
+      if (busy[name]) return; busy[name] = true;
+      try { return await f.apply(this, arguments); } finally { busy[name] = false; }
+    };
+  });
+})();

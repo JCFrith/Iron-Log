@@ -2131,8 +2131,8 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=16.3"></script>
-<script src="records.js?v=16.3"></script>
+<script src="nutrition.js?v=16.4"></script>
+<script src="records.js?v=16.4"></script>
 <script>
 
 "use strict";
@@ -2251,7 +2251,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "16.3";
+const APP_VERSION = "16.4";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -5703,6 +5703,43 @@ function importData(input){
 }
 
 let draftRestored = false;
+// v16.4: numbers typed into a workout are never thrown away. A draft that sat past the 12-hour
+// window used to be deleted silently; now it is saved as a session dated when it was last edited,
+// unless that day already has a saved session with the same lifts.
+let draftRecovered = null;
+function draftToSession(d){
+  const entries = {}; let n = 0;
+  for (const k of Object.keys(d.values||{})){
+    const rows = (Array.isArray(d.values[k]) ? d.values[k] : []).filter(r=>r && Number(r.r)>0);
+    if (!rows.length) continue;
+    const id = /^[a-z0-9-]{1,80}$/.test(k) ? k : slug(String(k)).slice(0,80);
+    if (!id) continue;
+    entries[id] = rows.map(r=>{ const o = {w:Number(r.w)||0, r:Number(r.r)||0};
+      if (r.t==="w" || r.t==="d") o.t = r.t;
+      if (r.e!=null && r.e!==""){ const e = Number(r.e); if (e>0 && e<=10) o.e = e; }
+      return o; });
+    n++;
+  }
+  if (!n) return null;
+  const when = new Date(Math.min(Date.now(), Number(d.t)||Date.now()));
+  const sess = {id:when.getTime(), date:when.toISOString(), workout:String(d.workoutId||"?").slice(0,40), entries, recovered:true};
+  if (d.sessionNote && String(d.sessionNote).trim()) sess.note = String(d.sessionNote).trim().slice(0,2000);
+  if (d.wkStart && Number(d.t) > Number(d.wkStart)){ const m = Math.round((Number(d.t)-Number(d.wkStart))/60000); if (m>=1 && m<=360) sess.mins = m; }
+  return sess;
+}
+try {
+  const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
+  if (d && d.values && hasEntered(d.values) && Date.now()-(Number(d.t)||0) >= DRAFT_TTL){
+    const day = d.day || dayKey(new Date(Number(d.t)||Date.now()));
+    const sess = draftToSession(d);
+    const already = sess && sessions.some(x=>!x.activity && dayKey(new Date(x.date))===day && Object.keys(sess.entries).some(k=>x.entries && x.entries[k] && x.entries[k].length));
+    if (sess && !already && !sessions.some(x=>x.id===sess.id)){
+      sessions.push(sess); sessions.sort((a,b)=>a.id-b.id); bumpSessions();
+      persist(); setDirty(true); draftRecovered = sess;
+    }
+    clearDraft();
+  }
+} catch(e){}
 try {
   const d = JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
   const _fresh = d && Date.now()-d.t < DRAFT_TTL && d.values && hasEntered(d.values);
@@ -5756,6 +5793,7 @@ if (!/^(jcfrith\.github\.io|iron-log-nu\.vercel\.app|iron-log-v2-preview-style-o
 }
 render();
 if (draftRestored) setTimeout(()=>toast("Unsaved session restored \u2014 pick up where you left off."), 400);
+if (draftRecovered) setTimeout(()=>toast("Found an unsaved workout from "+new Date(draftRecovered.date).toLocaleString(undefined,{weekday:"short",hour:"numeric",minute:"2-digit"})+" and saved it to your history."), 600);
 bootBackend();
 
 

@@ -3,7 +3,7 @@
 // Loaded before the main inline script. Uses globals from index.html at call time:
 // sb, auth, render, toast, esc, dayKey, fmtDate, sessions, whoopDays, whoopBody, scheduleFor, tab.
 
-const FDC_KEY = "DEMO_KEY"; // api.data.gov key; DEMO_KEY is rate limited (~30 req/hr per IP)
+const FDC_KEY = "MwK9ngCGPftLNNBDw99RB9NnGjHm9fKhkBtbzLBH"; // api.data.gov key (free tier, food lookups only). Visible to anyone who views this file; regenerate at api.data.gov if it is ever abused.
 const LIB_ZXING = "https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/umd/zxing-browser.min.js";
 const LIB_TESS = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 

@@ -2131,8 +2131,8 @@
 </div></header>
 <div class="ambient" aria-hidden="true"><div class="agrid"></div><div class="aorb a"></div><div class="aorb b"></div><div class="aorb c"></div></div>
 <main id="main"></main>
-<script src="nutrition.js?v=16.2"></script>
-<script src="records.js?v=16.2"></script>
+<script src="nutrition.js?v=16.3"></script>
+<script src="records.js?v=16.3"></script>
 <script>
 
 "use strict";
@@ -2251,7 +2251,7 @@ SCHEDULE = BUILTIN_SCHEDULE;
 const SUPA = "https://dercdbnghufetxjplpgq.supabase.co";
 const SUPA_KEY = "sb_publishable_DwhAO12EzwOlMgLUpxdwkg_AuXGS3lY";
 const AUTH_KEY = "iron-log-auth";
-const APP_VERSION = "16.2";
+const APP_VERSION = "16.3";
 const THEMES = { ember:"Ember", rose:"Rose", ocean:"Ocean", forest:"Forest", crimson:"Crimson" };
 let theme = "ember";
 try { const t = localStorage.getItem("iron-log-theme"); if (t && THEMES[t]) theme = t; } catch(e){}
@@ -2864,9 +2864,21 @@ async function whoopSync(silent){
     else if (!silent && j.reconnect) toast("WHOOP link expired \u2014 reconnect from the menu.");
   } catch(e){ if (!silent) toast("WHOOP sync failed."); }
 }
-function whoopConnect(){
+// v16.3: the sign-in token goes in a request header, never in a URL (URLs end up in history and logs).
+let _whoopStarting = false;
+async function whoopConnect(){
   if (!auth){ toast("Sign in first."); return; }
-  window.location.href = WHOOP_FN + "?action=start&token=" + encodeURIComponent(auth.at);
+  if (_whoopStarting) return; _whoopStarting = true;
+  try {
+    if (auth.exp - 60 < Math.floor(Date.now()/1000)) await refreshAuth();
+    const r = await fetch(WHOOP_FN, { method:"POST",
+      headers:{ "content-type":"application/json", "authorization":"Bearer "+auth.at },
+      body: JSON.stringify({ action:"start" }) });
+    const j = r.ok ? await r.json() : null;
+    if (!j || typeof j.url!=="string" || j.url.indexOf("https://api.prod.whoop.com/")!==0) throw 0;
+    window.location.href = j.url;
+  } catch(e){ toast("Couldn\u2019t start the WHOOP connection. Try again."); }
+  finally { _whoopStarting = false; }
 }
 async function whoopResync(){
   menuOpen = false; render();
